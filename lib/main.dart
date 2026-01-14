@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:intl/intl.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 void main() {
   runApp(const MyApp());
@@ -235,34 +236,73 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<void> _exportToFile() async {
+    if (!Platform.isAndroid) {
+      _addLog("Error", "Public Downloads export only supported on Android");
+      return;
+    }
+
     try {
-      Directory? directory = await getDownloadsDirectory();
-      if (directory == null) {
-        _addLog("Error", "Could not access Downloads directory");
-        return;
+      // Request MANAGE_EXTERNAL_STORAGE (All files access)
+      var permission = await Permission.manageExternalStorage.status;
+      if (!permission.isGranted) {
+        permission = await Permission.manageExternalStorage.request();
       }
 
-      final appDir = Directory('${directory.path}/insta_saver');
-      if (!await appDir.exists()) {
-        await appDir.create(recursive: true);
+      Directory saveDir;
+      String displayPath;
+
+      if (permission.isGranted) {
+        // Public Downloads folder
+        saveDir = Directory('/storage/emulated/0/Download/insta_saver');
+        displayPath = '/storage/emulated/0/Download/insta_saver/$_jsonFilename';
+      } else {
+        // Fallback to app-private Downloads
+        final Directory? privateDir = await getDownloadsDirectory();
+        if (privateDir == null) {
+          _addLog("Error", "Could not access any storage directory");
+          return;
+        }
+        saveDir = Directory('${privateDir.path}/insta_saver');
+        displayPath = 'App-private folder: ${saveDir.path}/$_jsonFilename';
+
+        _addLog("Warning", "Permission denied – saved to private folder");
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("To save in public Downloads, go to App Settings → Permissions → All files access → Allow"),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 8),
+          ),
+        );
       }
 
-      final path = '${appDir.path}/$_jsonFilename';
-      final file = File(path);
+      if (!await saveDir.exists()) {
+        await saveDir.create(recursive: true);
+      }
 
-      // Pretty-print JSON
+      final String filePath = '${saveDir.path}/$_jsonFilename';
+      final File file = File(filePath);
+
       final encoder = JsonEncoder.withIndent('  ');
       await file.writeAsString(encoder.convert(_accounts));
 
-      _addLog("Success", "Exported to Downloads/insta_saver/$_jsonFilename");
+      _addLog("Success", "Exported successfully!");
+      _addLog("Info", "Path: $displayPath");
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Saved to Downloads/insta_saver"),
+          content: Text("Exported! Check Logs for path"),
           backgroundColor: Colors.green,
         ),
       );
     } catch (e) {
       _addLog("Error", "Export failed: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Export failed – opening App Settings"),
+          backgroundColor: Colors.red,
+        ),
+      );
+      await openAppSettings();
     }
   }
 
@@ -462,7 +502,7 @@ class _MainScreenState extends State<MainScreen> {
                   IconButton(
                     icon: const Icon(Icons.download, color: Color(0xff22c55e)),
                     onPressed: _exportToFile,
-                    tooltip: "Export to Downloads/insta_saver",
+                    tooltip: "Export to public Downloads (requires 'All files access')",
                   ),
                   IconButton(
                     icon: const Icon(Icons.delete_sweep, color: Colors.red),
