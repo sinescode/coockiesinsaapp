@@ -206,11 +206,10 @@ class _MainScreenState extends State<MainScreen> {
         body: payload,
       );
 
-      if (response.statusCode == 200) {
-        _addLog("Success", "Webhook sent successfully");
-      } else {
-        _addLog("Error", "Webhook failed: ${response.statusCode}");
-      }
+      // Always log the full response (status code + body)
+      final responseBody = response.body.isEmpty ? "No response body" : response.body.trim();
+      final logStatus = (response.statusCode >= 200 && response.statusCode < 300) ? "Success" : "Error";
+      _addLog(logStatus, "Webhook (${response.statusCode}): $responseBody");
     } catch (e) {
       _addLog("Error", "Connection error: $e");
     }
