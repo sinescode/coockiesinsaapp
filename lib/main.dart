@@ -80,7 +80,7 @@ class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
   
   // Data Models
-  List<Map<String, String>> _accounts = [];
+  List<Map<String, dynamic>> _accounts = []; // Changed to dynamic
   List<Map<String, dynamic>> _logs = [];
   
   // Settings
@@ -99,39 +99,59 @@ class _MainScreenState extends State<MainScreen> {
   void initState() {
     super.initState();
     _loadData();
-    if (_currentPassword.isEmpty) {
-      _generatePassword();
-    } else {
-      _passwordController.text = _currentPassword;
-    }
   }
 
-  // --- Data Persistence Logic ---
-
+  // --- Fixed Data Persistence Logic ---
+  
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
     
+    // Load settings FIRST
+    final savedWebhook = prefs.getString('webhook_url');
+    final savedFilename = prefs.getString('json_filename');
+    final savedPassword = prefs.getString('current_password');
+    
     setState(() {
-      _webhookUrl = prefs.getString('webhook_url') ?? _webhookUrl;
-      _jsonFilename = prefs.getString('json_filename') ?? _jsonFilename;
-      _currentPassword = prefs.getString('current_password') ?? "";
+      // Only use defaults if nothing saved
+      _webhookUrl = savedWebhook ?? _webhookUrl;
+      _jsonFilename = savedFilename ?? _jsonFilename;
+      _currentPassword = savedPassword ?? "";
       
-      // Load Accounts
+      // Load Accounts with proper type conversion
       String? accountsStr = prefs.getString('accounts_list');
-      if (accountsStr != null) {
-        _accounts = List<Map<String, String>>.from(json.decode(accountsStr));
+      if (accountsStr != null && accountsStr.isNotEmpty) {
+        try {
+          final List<dynamic> decoded = json.decode(accountsStr);
+          _accounts = decoded.map<Map<String, dynamic>>((item) {
+            return Map<String, dynamic>.from(item);
+          }).toList();
+        } catch (e) {
+          _addLog("Error", "Failed to load accounts: $e");
+        }
       }
 
       // Load Logs
       String? logsStr = prefs.getString('logs_list');
-      if (logsStr != null) {
-        _logs = List<Map<String, dynamic>>.from(json.decode(logsStr));
+      if (logsStr != null && logsStr.isNotEmpty) {
+        try {
+          final List<dynamic> decoded = json.decode(logsStr);
+          _logs = decoded.map<Map<String, dynamic>>((item) {
+            return Map<String, dynamic>.from(item);
+          }).toList();
+        } catch (e) {
+          _addLog("Error", "Failed to load logs: $e");
+        }
       }
       
-      // Set settings controllers
+      // Set controllers AFTER loading data
       _webhookController.text = _webhookUrl;
       _filenameController.text = _jsonFilename;
       _passwordController.text = _currentPassword;
+      
+      // Generate new password ONLY if no password exists
+      if (_currentPassword.isEmpty) {
+        _generatePassword();
+      }
     });
   }
 
@@ -140,17 +160,19 @@ class _MainScreenState extends State<MainScreen> {
     await prefs.setString('webhook_url', _webhookUrl);
     await prefs.setString('json_filename', _jsonFilename);
     await prefs.setString('current_password', _currentPassword);
+    
+    // Save accounts with proper encoding
     await prefs.setString('accounts_list', json.encode(_accounts));
     await prefs.setString('logs_list', json.encode(_logs));
   }
 
-  // --- Feature Logic ---
+  // --- Fixed Feature Logic ---
 
   void _generatePassword() {
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-    final dateStr = DateFormat('dd').format(DateTime.now()); // Today's Day (e.g., 13)
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#";
+    final dateStr = DateFormat('dd').format(DateTime.now());
     final random = Random();
-    final length = random.nextInt(5) + 8; // 8 to 12
+    final length = random.nextInt(5) + 8;
     final letterCount = length - dateStr.length;
 
     String result = '';
@@ -159,299 +181,74 @@ class _MainScreenState extends State<MainScreen> {
     }
     _currentPassword = result + dateStr;
     _passwordController.text = _currentPassword;
-    _saveData();
+    _saveData(); // Save immediately
   }
 
-  void _copyPassword() {
-    Clipboard.setData(ClipboardData(text: _currentPassword));
-    _addLog("System", "Password copied to clipboard");
-  }
-
-  Future<void> _submitData() async {
-    final username = _usernameController.text.trim();
-    final password = _passwordController.text.trim();
-    final cookies = _cookiesController.text.trim();
-    final webhook = _webhookController.text.trim();
-
-    if (username.isEmpty || password.isEmpty) {
-      _addLog("Error", "Username and Password required");
-      return;
-    }
-
-    // Update Settings
-    _webhookUrl = webhook;
-    _jsonFilename = _filenameController.text.trim();
-    
-    // Create new entry
-    final newEntry = {
-      "email": "",
-      "username": username,
-      "password": password,
-      "auth_code": cookies,
-    };
-
-    // Save to Local Storage (Accounts List)
-    setState(() {
-      _accounts.add(newEntry);
-    });
-
-    // Prepare Webhook Payload (Base64)
-    String convertedStr = "$username:$password|||$cookies||";
-    String payload = "accounts=${base64.encode(utf8.encode(convertedStr))}";
-
-    // Send Request
-    try {
-      final response = await http.post(
-        Uri.parse(webhook),
-        headers: {'Content-Type': 'text/plain'},
-        body: payload,
-      );
-
-      if (response.statusCode == 200) {
-        _addLog("Success", "Webhook response: ${response.body}");
-      } else {
-        _addLog("Error", "Webhook failed: ${response.statusCode}");
-      }
-    } catch (e) {
-      _addLog("Error", "Connection error: $e");
-    }
-
-    // Save everything and Reset Inputs
-    await _saveData();
-    _usernameController.clear();
-    _cookiesController.clear();
-    _generatePassword(); // Change password for next use
-  }
-
-  void _addLog(String status, String message) {
-    setState(() {
-      _logs.insert(0, {
-        "status": status,
-        "message": message,
-        "time": DateFormat.Hms().format(DateTime.now())
-      });
-    });
-    _saveData();
-  }
-
+  // --- FIXED Storage Export Function ---
+  
   Future<void> _exportToFile() async {
-    // Request Permission for Android 10+ (Scoped Storage)
-    // Note: Writing to /Download directly requires MANAGE_EXTERNAL_STORAGE on newer Androids
-    // or using the Storage Access Framework. For this example, we try standard Downloads.
-    
-    var status = await Permission.storage.request();
-    if (!status.isGranted) {
-      _addLog("Error", "Storage permission denied");
+    if (_accounts.isEmpty) {
+      _addLog("Error", "No accounts to export");
       return;
     }
 
     try {
+      // Use getExternalStorageDirectory for Android Download folder
       Directory? directory;
+      
       if (Platform.isAndroid) {
-        // Try to get the Downloads directory
-        directory = Directory('/storage/emulated/0/Download/insta_saver');
-        if (!await directory.exists()) {
-          await directory.create(recursive: true);
+        // For Android, use external storage directory
+        directory = await getExternalStorageDirectory();
+        if (directory != null) {
+          // Navigate to Download subdirectory
+          directory = Directory('${directory.path}/Download/insta_saver');
         }
-      } else {
+      } else if (Platform.isIOS) {
+        // For iOS, use documents directory
         directory = await getApplicationDocumentsDirectory();
       }
-
-      if (directory != null) {
-        final path = "${directory.path}/$_jsonFilename";
-        final file = File(path);
-        await file.writeAsString(json.encode(_accounts, toEncodable: (e) => e.toString()));
-        
-        _addLog("Success", "Exported to: $path");
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Saved to Download/insta_saver"), backgroundColor: Colors.green),
-        );
+      
+      if (directory == null) {
+        _addLog("Error", "Could not access storage directory");
+        return;
       }
+
+      // Create directory if it doesn't exist
+      if (!await directory.exists()) {
+        await directory.create(recursive: true);
+      }
+
+      final file = File('${directory.path}/$_jsonFilename');
+      final jsonData = json.encode(_accounts, toEncodable: (dynamic item) {
+        if (item is Map<String, dynamic>) {
+          return item.map((key, value) => MapEntry(key, value.toString()));
+        }
+        return item.toString();
+      });
+      
+      await file.writeAsString(jsonData);
+      
+      _addLog("Success", "Exported ${_accounts.length} accounts to: ${file.path}");
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Exported to ${file.path}"),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 3),
+        ),
+      );
     } catch (e) {
       _addLog("Error", "Export failed: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Export failed: $e"),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text("Account Manager", style: TextStyle(color: Colors.white)),
-        backgroundColor: const Color(0xff111827),
-        elevation: 0,
-      ),
-      body: IndexedStack(
-        index: _currentIndex,
-        children: [
-          _buildHomeTab(),
-          _buildSavedTab(),
-          _buildSettingsTab(),
-        ],
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: (index) => setState(() => _currentIndex = index),
-        backgroundColor: const Color(0xff111827),
-        selectedItemColor: const Color(0xff22c55e),
-        unselectedItemColor: const Color(0xff94a3b8),
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: "Home"),
-          BottomNavigationBarItem(icon: Icon(Icons.save_alt), label: "Saved"),
-          BottomNavigationBarItem(icon: Icon(Icons.settings), label: "Settings"),
-        ],
-      ),
-    );
-  }
-
-  // --- TAB 1: HOME ---
-
-  Widget _buildHomeTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _buildInput("Username", _usernameController, false),
-          const SizedBox(height: 15),
-          
-          // Password Input with Actions
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text("Password", style: TextStyle(color: Color(0xff94a3b8), fontSize: 12)),
-              const SizedBox(height: 5),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _passwordController,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: InputDecoration(
-                        filled: true,
-                        fillColor: const Color(0xff0b1220),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: Color(0xff1f2937)),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 5),
-                  _buildSmallBtn("Copy", _copyPassword),
-                  const SizedBox(width: 5),
-                  _buildSmallBtn("Change", _generatePassword),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 15),
-          
-          _buildInput("Cookies", _cookiesController, false),
-          const SizedBox(height: 20),
-          
-          // Action Buttons Row
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () {
-                    _usernameController.clear();
-                    _cookiesController.clear();
-                  },
-                  child: const Text("Clear Inputs"),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                flex: 2,
-                child: ElevatedButton(
-                  onPressed: _submitData,
-                  child: const Text("Convert & Push"),
-                ),
-              ),
-            ],
-          ),
-          
-          const SizedBox(height: 30),
-          
-          // Logs Section
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text("Logs", style: TextStyle(color: Color(0xff94a3b8), fontSize: 14, fontWeight: FontWeight.bold)),
-              TextButton(
-                onPressed: () {
-                  setState(() => _logs.clear());
-                  _saveData();
-                }, 
-                child: const Text("Clear Logs", style: TextStyle(fontSize: 12, color: Colors.red))
-              )
-            ],
-          ),
-          const SizedBox(height: 10),
-          Container(
-            constraints: const BoxConstraints(maxHeight: 200),
-            decoration: BoxDecoration(
-              color: const Color(0xff0b1220),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0xff1f2937)),
-            ),
-            child: _logs.isEmpty
-                ? const Center(child: Text("No logs yet", style: TextStyle(color: Color(0xff475569), fontSize: 12)))
-                : ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: _logs.length,
-                    itemBuilder: (context, index) {
-                      final log = _logs[index];
-                      final isError = log['status'] == "Error";
-                      return ListTile(
-                        dense: true,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
-                        leading: Text(
-                          log['time'],
-                          style: const TextStyle(fontSize: 10, color: Color(0xff94a3b8)),
-                        ),
-                        title: Text(
-                          "${log['status']}: ${log['message']}",
-                          style: TextStyle(fontSize: 12, color: isError ? Colors.redAccent : Colors.greenAccent),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildInput(String label, TextEditingController controller, bool obscure) {
-    return TextField(
-      controller: controller,
-      obscureText: obscure,
-      style: const TextStyle(color: Colors.white),
-      decoration: InputDecoration(
-        labelText: label,
-        border: const OutlineInputBorder(),
-      ),
-    );
-  }
-
-  Widget _buildSmallBtn(String text, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-        decoration: BoxDecoration(
-          color: const Color(0xff334155),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 12)),
-      ),
-    );
-  }
-
-  // --- TAB 2: SAVED ---
+  // --- Fixed Saved Tab with Better Cards ---
 
   Widget _buildSavedTab() {
     return Column(
@@ -465,21 +262,32 @@ class _MainScreenState extends State<MainScreen> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text("Saved Accounts: ${_accounts.length}", style: const TextStyle(color: Colors.white)),
+              Text(
+                "Saved Accounts: ${_accounts.length}",
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
               Row(
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.download, color: Color(0xff22c55e)),
+                  ElevatedButton.icon(
                     onPressed: _exportToFile,
-                    tooltip: "Download to Download/insta_saver",
+                    icon: const Icon(Icons.download, size: 18),
+                    label: const Text("Export"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xff22c55e),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.delete_sweep, color: Colors.red),
-                    onPressed: () {
-                      setState(() => _accounts.clear());
-                      _saveData();
+                  const SizedBox(width: 10),
+                  ElevatedButton.icon(
+                    onPressed: _accounts.isEmpty ? null : () {
+                      _showClearConfirmationDialog();
                     },
-                    tooltip: "Clear All",
+                    icon: const Icon(Icons.delete_forever, size: 18, color: Colors.white),
+                    label: const Text("Clear All", style: TextStyle(color: Colors.white)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
                   ),
                 ],
               )
@@ -488,44 +296,26 @@ class _MainScreenState extends State<MainScreen> {
         ),
         Expanded(
           child: _accounts.isEmpty
-              ? const Center(child: Text("No saved accounts", style: TextStyle(color: Color(0xff475569))))
+              ? const Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.save_alt, size: 64, color: Color(0xff475569)),
+                      SizedBox(height: 16),
+                      Text("No saved accounts yet", 
+                          style: TextStyle(color: Color(0xff94a3b8), fontSize: 16)),
+                      SizedBox(height: 8),
+                      Text("Add accounts from the Home tab", 
+                          style: TextStyle(color: Color(0xff64748b), fontSize: 12)),
+                    ],
+                  ),
+                )
               : ListView.builder(
                   padding: const EdgeInsets.all(16),
                   itemCount: _accounts.length,
                   itemBuilder: (context, index) {
                     final acc = _accounts[index];
-                    return Card(
-                      color: const Color(0xff1f2937),
-                      margin: const EdgeInsets.only(bottom: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(acc['username'] ?? "Unknown", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-                                IconButton(
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(),
-                                  icon: const Icon(Icons.close, color: Colors.red, size: 20),
-                                  onPressed: () {
-                                    setState(() => _accounts.removeAt(index));
-                                    _saveData();
-                                  },
-                                )
-                              ],
-                            ),
-                            const SizedBox(height: 5),
-                            Text("Pass: ${acc['password']}", style: const TextStyle(color: Color(0xff94a3b8), fontSize: 12)),
-                            const SizedBox(height: 2),
-                            Text("Cookies: ${acc['auth_code']?.substring(0, 20)}...", style: const TextStyle(color: Color(0xff94a3b8), fontSize: 10)),
-                          ],
-                        ),
-                      ),
-                    );
+                    return _buildAccountCard(acc, index);
                   },
                 ),
         ),
@@ -533,48 +323,433 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  // --- TAB 3: SETTINGS ---
+  Widget _buildAccountCard(Map<String, dynamic> account, int index) {
+    final username = account['username'] ?? 'Unknown';
+    final password = account['password'] ?? '';
+    final cookies = account['auth_code'] ?? '';
+    final email = account['email'] ?? '';
+    
+    return Card(
+      color: const Color(0xff1f2937),
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: Color(0xff374151), width: 1),
+      ),
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header with username and delete button
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.person, size: 16, color: Color(0xff94a3b8)),
+                          const SizedBox(width: 8),
+                          Text(
+                            username,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                      if (email.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            const Icon(Icons.email, size: 14, color: Color(0xff94a3b8)),
+                            const SizedBox(width: 8),
+                            Text(
+                              email,
+                              style: const TextStyle(color: Color(0xff94a3b8), fontSize: 12),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                // Delete button with better visibility
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.red.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.red.withOpacity(0.3)),
+                  ),
+                  child: IconButton(
+                    icon: const Icon(Icons.delete, color: Colors.red, size: 20),
+                    onPressed: () => _deleteAccount(index),
+                    padding: const EdgeInsets.all(8),
+                    tooltip: "Delete account",
+                  ),
+                ),
+              ],
+            ),
+            
+            const SizedBox(height: 12),
+            const Divider(color: Color(0xff374151), height: 1),
+            const SizedBox(height: 12),
+            
+            // Password section
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "Password",
+                  style: TextStyle(color: Color(0xff94a3b8), fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xff0f172a),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: const Color(0xff1f2937)),
+                        ),
+                        child: SelectableText(
+                          password,
+                          style: const TextStyle(
+                            color: Color(0xff22c55e),
+                            fontFamily: 'Monospace',
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.copy, size: 18, color: Color(0xff94a3b8)),
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: password));
+                        _addLog("Copied", "Password copied to clipboard");
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Password copied!"),
+                            backgroundColor: Colors.green,
+                            duration: Duration(seconds: 1),
+                          ),
+                        );
+                      },
+                      tooltip: "Copy password",
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            
+            const SizedBox(height: 12),
+            
+            // Cookies section
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "Cookies",
+                  style: TextStyle(color: Color(0xff94a3b8), fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xff0f172a),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: const Color(0xff1f2937)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SelectableText(
+                        cookies.length > 100 ? "${cookies.substring(0, 100)}..." : cookies,
+                        style: const TextStyle(
+                          color: Color(0xff94a3b8),
+                          fontFamily: 'Monospace',
+                          fontSize: 11,
+                        ),
+                      ),
+                      if (cookies.length > 100) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          "${cookies.length} characters total",
+                          style: const TextStyle(color: Color(0xff64748b), fontSize: 10),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            
+            const SizedBox(height: 12),
+            
+            // Footer with timestamp if available
+            if (account['timestamp'] != null) 
+              Text(
+                "Added: ${account['timestamp']}",
+                style: const TextStyle(color: Color(0xff64748b), fontSize: 10),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 
+  void _deleteAccount(int index) async {
+    final account = _accounts[index];
+    final username = account['username'] ?? 'Unknown';
+    
+    // Show confirmation dialog
+    bool confirm = await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Delete Account", style: TextStyle(color: Colors.white)),
+        content: Text("Are you sure you want to delete account '$username'?", 
+                    style: const TextStyle(color: Color(0xff94a3b8))),
+        backgroundColor: const Color(0xff1f2937),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("Cancel", style: TextStyle(color: Color(0xff94a3b8))),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text("Delete", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    ) ?? false;
+    
+    if (confirm) {
+      setState(() {
+        _accounts.removeAt(index);
+      });
+      await _saveData();
+      _addLog("Deleted", "Account '$username' removed");
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Deleted account '$username'"),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+  }
+
+  void _showClearConfirmationDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Clear All Accounts", style: TextStyle(color: Colors.white)),
+        content: Text("Are you sure you want to delete all ${_accounts.length} accounts?", 
+                    style: const TextStyle(color: Color(0xff94a3b8))),
+        backgroundColor: const Color(0xff1f2937),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel", style: TextStyle(color: Color(0xff94a3b8))),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              setState(() {
+                _accounts.clear();
+              });
+              _saveData();
+              _addLog("Cleared", "All accounts removed");
+            },
+            child: const Text("Clear All", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- Fixed Settings Tab ---
+  
   Widget _buildSettingsTab() {
-    return Padding(
+    return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          const Text(
+            "Webhook Settings",
+            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            "Note: The webhook URL from the URL returns 404 status. Make sure to update it with a valid endpoint.",
+            style: TextStyle(color: Colors.orange, fontSize: 12),
+          ),
+          const SizedBox(height: 12),
           TextField(
             controller: _webhookController,
             style: const TextStyle(color: Colors.white),
             decoration: const InputDecoration(
               labelText: "Webhook URL",
+              hintText: "https://your-webhook-endpoint.com",
               border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.webhook, color: Color(0xff94a3b8)),
             ),
+            onChanged: (value) {
+              // Auto-save as user types
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _webhookUrl = value;
+                _saveData();
+              });
+            },
           ),
-          const SizedBox(height: 20),
+          
+          const SizedBox(height: 24),
+          
+          const Text(
+            "Export Settings",
+            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
           TextField(
             controller: _filenameController,
             style: const TextStyle(color: Colors.white),
             decoration: const InputDecoration(
               labelText: "JSON Filename",
+              hintText: "accounts.json",
               border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.description, color: Color(0xff94a3b8)),
             ),
+            onChanged: (value) {
+              // Auto-save as user types
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _jsonFilename = value.isNotEmpty ? value : "accounts.json";
+                _saveData();
+              });
+            },
           ),
-          const SizedBox(height: 30),
+          
+          const SizedBox(height: 24),
+          
+          const Text(
+            "Password Settings",
+            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xff0f172a),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xff1f2937)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        "Current Password",
+                        style: TextStyle(color: Color(0xff94a3b8), fontSize: 12),
+                      ),
+                      const SizedBox(height: 4),
+                      SelectableText(
+                        _currentPassword,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontFamily: 'Monospace',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Column(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.refresh, color: Color(0xff22c55e)),
+                    onPressed: _generatePassword,
+                    tooltip: "Generate new password",
+                  ),
+                  const Text("Regenerate", style: TextStyle(color: Color(0xff94a3b8), fontSize: 10)),
+                ],
+              ),
+            ],
+          ),
+          
+          const SizedBox(height: 32),
+          
+          // Save button as backup
           SizedBox(
             width: double.infinity,
-            child: OutlinedButton(
+            child: ElevatedButton.icon(
               onPressed: () {
                 setState(() {
                   _webhookUrl = _webhookController.text;
                   _jsonFilename = _filenameController.text;
-                  _currentPassword = _passwordController.text;
                 });
                 _saveData();
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Settings Saved"), backgroundColor: Colors.green)
+                  const SnackBar(
+                    content: Text("All settings saved!"),
+                    backgroundColor: Colors.green,
+                    duration: Duration(seconds: 2),
+                  )
                 );
               },
-              child: const Text("Save Settings"),
+              icon: const Icon(Icons.save),
+              label: const Text("Force Save All Settings"),
             ),
-          )
+          ),
+          
+          const SizedBox(height: 16),
+          
+          // App info
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xff0f172a),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xff1f2937)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "App Information",
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  "Accounts: ${_accounts.length}",
+                  style: const TextStyle(color: Color(0xff94a3b8), fontSize: 12),
+                ),
+                Text(
+                  "Logs: ${_logs.length}",
+                  style: const TextStyle(color: Color(0xff94a3b8), fontSize: 12),
+                ),
+                Text(
+                  "Last save: ${DateFormat('HH:mm:ss').format(DateTime.now())}",
+                  style: const TextStyle(color: Color(0xff94a3b8), fontSize: 12),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
