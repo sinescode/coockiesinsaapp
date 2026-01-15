@@ -83,7 +83,7 @@ class _MainScreenState extends State<MainScreen> {
   List<Map<String, String>> _accounts = [];
   List<Map<String, dynamic>> _logs = [];
   
-  // Settings
+  // Settings Variables
   String _webhookUrl = "https://ins.skysysx.com/api/api/v1/webhook/...";
   String _jsonFilename = "accounts.json";
   String _currentPassword = "";
@@ -106,30 +106,47 @@ class _MainScreenState extends State<MainScreen> {
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
     
-    setState(() {
-      _webhookUrl = prefs.getString('webhook_url') ?? _webhookUrl;
-      _jsonFilename = prefs.getString('json_filename') ?? _jsonFilename;
-      _currentPassword = prefs.getString('current_password') ?? "";
-      
-      // Load Accounts
-      String? accountsStr = prefs.getString('accounts_list');
-      if (accountsStr != null) {
-        _accounts = List<Map<String, String>>.from(json.decode(accountsStr));
-      }
+    // 1. Load Settings
+    final savedWebhook = prefs.getString('webhook_url');
+    final savedFilename = prefs.getString('json_filename');
+    final savedPassword = prefs.getString('current_password');
 
-      // Load Logs
-      String? logsStr = prefs.getString('logs_list');
-      if (logsStr != null) {
-        _logs = List<Map<String, dynamic>>.from(json.decode(logsStr));
-      }
-      
-      // Set controllers
+    setState(() {
+      // Update variables if they exist in storage, otherwise keep defaults
+      if (savedWebhook != null) _webhookUrl = savedWebhook;
+      if (savedFilename != null) _jsonFilename = savedFilename;
+      _currentPassword = savedPassword ?? ""; 
+
+      // Update Controllers to match variables (Crucial for UI consistency)
       _webhookController.text = _webhookUrl;
       _filenameController.text = _jsonFilename;
       _passwordController.text = _currentPassword;
+
+      // Load Accounts (Safe Parsing)
+      String? accountsStr = prefs.getString('accounts_list');
+      if (accountsStr != null && accountsStr.isNotEmpty) {
+        try {
+          final List<dynamic> decoded = json.decode(accountsStr);
+          _accounts = decoded.map((e) => Map<String, String>.from(e)).toList();
+        } catch (e) {
+          _addLog("System", "Error loading saved accounts: $e");
+        }
+      }
+
+      // Load Logs (Safe Parsing)
+      String? logsStr = prefs.getString('logs_list');
+      if (logsStr != null && logsStr.isNotEmpty) {
+        try {
+          final List<dynamic> decoded = json.decode(logsStr);
+          _logs = decoded.map((e) => Map<String, dynamic>.from(e)).toList();
+        } catch (e) {
+          // If logs fail to load, we just start fresh logs
+          print("Error loading logs: $e");
+        }
+      }
     });
 
-    // Generate password only if none exists (first launch)
+    // 2. Generate Password only if none exists (First Launch)
     if (_currentPassword.isEmpty) {
       _generatePassword();
     }
@@ -137,9 +154,13 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _saveData() async {
     final prefs = await SharedPreferences.getInstance();
+    
+    // Save Settings
     await prefs.setString('webhook_url', _webhookUrl);
     await prefs.setString('json_filename', _jsonFilename);
     await prefs.setString('current_password', _currentPassword);
+    
+    // Save Lists
     await prefs.setString('accounts_list', json.encode(_accounts));
     await prefs.setString('logs_list', json.encode(_logs));
   }
@@ -147,7 +168,7 @@ class _MainScreenState extends State<MainScreen> {
   // --- Feature Logic ---
 
   void _generatePassword() {
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     final dateStr = DateFormat('dd').format(DateTime.now());
     final random = Random();
     final length = random.nextInt(5) + 8; // 8 to 12 total length
@@ -157,8 +178,13 @@ class _MainScreenState extends State<MainScreen> {
     for (int i = 0; i < letterCount; i++) {
       result += chars[random.nextInt(chars.length)];
     }
-    _currentPassword = result + dateStr;
-    _passwordController.text = _currentPassword;
+    
+    setState(() {
+      _currentPassword = result + dateStr;
+      _passwordController.text = _currentPassword;
+    });
+    
+    // Save immediately so it persists if app closes
     _saveData();
   }
 
@@ -169,37 +195,37 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _submitData() async {
     final username = _usernameController.text.trim();
-    final password = _passwordController.text.trim();
+    // Use the text from the controller, not the variable directly, to be safe
+    final password = _passwordController.text.trim(); 
     final cookies = _cookiesController.text.trim();
-    final webhook = _webhookController.text.trim();
+    
+    // Update current settings from controllers before saving
+    _webhookUrl = _webhookController.text.trim();
+    _jsonFilename = _filenameController.text.trim();
 
     if (username.isEmpty || password.isEmpty) {
       _addLog("Error", "Username and Password required");
       return;
     }
-
-    // Update Settings from current inputs
-    _webhookUrl = webhook;
-    _jsonFilename = _filenameController.text.trim();
     
-    // Create new entry
+    // Create new entry with the CURRENT password
     final newEntry = {
       "email": "",
       "username": username,
-      "password": password,
+      "password": password, // This is the password used for this account
       "auth_code": cookies,
     };
 
-    // Save to Local Storage
+    // 1. Save Account to Local State
     setState(() {
       _accounts.add(newEntry);
     });
 
-    // Prepare Webhook Payload
+    // 2. Prepare Webhook Payload
     String convertedStr = "$username:$password|||$cookies||";
     String payload = "accounts=${base64.encode(utf8.encode(convertedStr))}";
 
-    // Send Request
+    // 3. Send Request
     try {
       final response = await http.post(
         Uri.parse(_webhookUrl),
@@ -207,7 +233,6 @@ class _MainScreenState extends State<MainScreen> {
         body: payload,
       );
 
-      // Always log the full response (status code + body)
       final responseBody = response.body.isEmpty ? "No response body" : response.body.trim();
       final logStatus = (response.statusCode >= 200 && response.statusCode < 300) ? "Success" : "Error";
       _addLog(logStatus, "Webhook (${response.statusCode}): $responseBody");
@@ -215,13 +240,17 @@ class _MainScreenState extends State<MainScreen> {
       _addLog("Error", "Connection error: $e");
     }
 
-    // Save everything
+    // 4. Save everything to disk (Current State)
     await _saveData();
     
-    // Clear inputs and generate new password for next entry
+    // 5. Clear inputs and generate NEW password for next entry
     _usernameController.clear();
     _cookiesController.clear();
-    _generatePassword();
+    
+    // This generates a new password and saves it as the "current" password
+    _generatePassword(); 
+    
+    _addLog("System", "Password changed for next entry");
   }
 
   void _addLog(String status, String message) {
@@ -601,10 +630,10 @@ class _MainScreenState extends State<MainScreen> {
             width: double.infinity,
             child: OutlinedButton(
               onPressed: () {
+                // Update variables from controllers
                 setState(() {
                   _webhookUrl = _webhookController.text.trim();
                   _jsonFilename = _filenameController.text.trim();
-                  _currentPassword = _passwordController.text.trim();
                 });
                 _saveData();
                 ScaffoldMessenger.of(context).showSnackBar(
