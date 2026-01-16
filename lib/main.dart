@@ -180,7 +180,7 @@ class _MainScreenState extends State<MainScreen> {
 
   void _copyPassword() {
     Clipboard.setData(ClipboardData(text: _currentPassword));
-    _addLog("System", "Password copied to clipboard");
+    
   }
 
   Future<void> _submitData() async {
@@ -239,16 +239,29 @@ class _MainScreenState extends State<MainScreen> {
             
             // Eye-catching format
             logMessage = " Success: $successCount  | Failed: $failedCount";
+
+            // --- UPDATED LOGIC: Color and Boldness based on counts ---
+            String logStyle = "normal";
+            if (successCount == 0) {
+               logStatus = "Error"; // Triggers Red color
+            } else if (failedCount == 0) {
+               logStyle = "bold";   // Triggers Bold text
+            }
+            // ---------------------------------------------------------
+
+            _addLog(logStatus, "(${response.statusCode}) $logMessage", style: logStyle);
           } else {
             logMessage = response.body.trim(); // Fallback
+            _addLog(logStatus, "(${response.statusCode}) $logMessage");
           }
         } catch (e) {
           // If parsing fails, just show trimmed body or error
           logMessage = "Invalid JSON response";
+          _addLog(logStatus, "(${response.statusCode}) $logMessage");
         }
+      } else {
+          _addLog(logStatus, "(${response.statusCode}) $logMessage");
       }
-
-      _addLog(logStatus, "(${response.statusCode}) $logMessage");
       
     } catch (e) {
       _addLog("Error", "Connection error: $e");
@@ -259,15 +272,17 @@ class _MainScreenState extends State<MainScreen> {
     _usernameController.clear();
     _cookiesController.clear();
     _generatePassword(); 
-    _addLog("System", "Password changed for next entry");
+    
   }
 
-  void _addLog(String status, String message) {
+  // --- UPDATED: Added style parameter ---
+  void _addLog(String status, String message, {String style = "normal"}) {
     setState(() {
       _logs.insert(0, {
         "status": status,
         "message": message,
-        "time": DateFormat.Hms().format(DateTime.now())
+        "time": DateFormat.Hms().format(DateTime.now()),
+        "style": style, // Store style preference
       });
     });
     _saveData();
@@ -472,7 +487,21 @@ class _MainScreenState extends State<MainScreen> {
                       final log = _logs[index];
                       final isError = log['status'] == "Error" || log['status'] == "Warning";
                       final isWebhook = log['status'] == "Webhook";
+                      final isBold = log['style'] == "bold"; // Check for bold style
                       
+                      // Determine Color
+                      Color logColor;
+                      if (isError) {
+                          logColor = Colors.redAccent;
+                      } else if (isWebhook) {
+                          logColor = Colors.cyanAccent;
+                      } else {
+                          logColor = Colors.greenAccent;
+                      }
+
+                      // Determine Font Weight
+                      FontWeight fontWeight = isBold ? FontWeight.bold : FontWeight.normal;
+
                       return ListTile(
                         dense: true,
                         contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
@@ -484,8 +513,8 @@ class _MainScreenState extends State<MainScreen> {
                           "${log['status']}: ${log['message']}",
                           style: TextStyle(
                             fontSize: 12, 
-                            color: isError ? Colors.redAccent : (isWebhook ? Colors.cyanAccent : Colors.greenAccent),
-                            fontWeight: isWebhook ? FontWeight.bold : FontWeight.normal,
+                            color: logColor,
+                            fontWeight: fontWeight,
                           ),
                         ),
                       );
@@ -545,7 +574,6 @@ class _MainScreenState extends State<MainScreen> {
                     onPressed: _exportToFile,
                     tooltip: "Export to public Downloads (requires 'All files access')",
                   ),
-                  // --- UPDATED: Added Confirmation Dialog for Delete All ---
                   IconButton(
                     icon: const Icon(Icons.delete_sweep, color: Colors.red),
                     onPressed: () async {
