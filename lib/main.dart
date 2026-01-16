@@ -112,17 +112,15 @@ class _MainScreenState extends State<MainScreen> {
     final savedPassword = prefs.getString('current_password');
 
     setState(() {
-      // Update variables if they exist in storage, otherwise keep defaults
       if (savedWebhook != null) _webhookUrl = savedWebhook;
       if (savedFilename != null) _jsonFilename = savedFilename;
       _currentPassword = savedPassword ?? ""; 
 
-      // Update Controllers to match variables (Crucial for UI consistency)
       _webhookController.text = _webhookUrl;
       _filenameController.text = _jsonFilename;
       _passwordController.text = _currentPassword;
 
-      // Load Accounts (Safe Parsing)
+      // Load Accounts
       String? accountsStr = prefs.getString('accounts_list');
       if (accountsStr != null && accountsStr.isNotEmpty) {
         try {
@@ -133,20 +131,18 @@ class _MainScreenState extends State<MainScreen> {
         }
       }
 
-      // Load Logs (Safe Parsing)
+      // Load Logs
       String? logsStr = prefs.getString('logs_list');
       if (logsStr != null && logsStr.isNotEmpty) {
         try {
           final List<dynamic> decoded = json.decode(logsStr);
           _logs = decoded.map((e) => Map<String, dynamic>.from(e)).toList();
         } catch (e) {
-          // If logs fail to load, we just start fresh logs
           print("Error loading logs: $e");
         }
       }
     });
 
-    // 2. Generate Password only if none exists (First Launch)
     if (_currentPassword.isEmpty) {
       _generatePassword();
     }
@@ -154,13 +150,9 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _saveData() async {
     final prefs = await SharedPreferences.getInstance();
-    
-    // Save Settings
     await prefs.setString('webhook_url', _webhookUrl);
     await prefs.setString('json_filename', _jsonFilename);
     await prefs.setString('current_password', _currentPassword);
-    
-    // Save Lists
     await prefs.setString('accounts_list', json.encode(_accounts));
     await prefs.setString('logs_list', json.encode(_logs));
   }
@@ -171,7 +163,7 @@ class _MainScreenState extends State<MainScreen> {
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     final dateStr = DateFormat('dd').format(DateTime.now());
     final random = Random();
-    final length = random.nextInt(5) + 8; // 8 to 12 total length
+    final length = random.nextInt(5) + 8; 
     final letterCount = length - dateStr.length;
 
     String result = '';
@@ -183,8 +175,6 @@ class _MainScreenState extends State<MainScreen> {
       _currentPassword = result + dateStr;
       _passwordController.text = _currentPassword;
     });
-    
-    // Save immediately so it persists if app closes
     _saveData();
   }
 
@@ -195,11 +185,9 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _submitData() async {
     final username = _usernameController.text.trim();
-    // Use the text from the controller, not the variable directly, to be safe
     final password = _passwordController.text.trim(); 
     final cookies = _cookiesController.text.trim();
     
-    // Update current settings from controllers before saving
     _webhookUrl = _webhookController.text.trim();
     _jsonFilename = _filenameController.text.trim();
 
@@ -208,24 +196,20 @@ class _MainScreenState extends State<MainScreen> {
       return;
     }
     
-    // Create new entry with the CURRENT password
     final newEntry = {
       "email": "",
       "username": username,
-      "password": password, // This is the password used for this account
+      "password": password,
       "auth_code": cookies,
     };
 
-    // 1. Save Account to Local State
     setState(() {
       _accounts.add(newEntry);
     });
 
-    // 2. Prepare Webhook Payload
     String convertedStr = "$username:$password|||$cookies||";
     String payload = "accounts=${base64.encode(utf8.encode(convertedStr))}";
 
-    // 3. Send Request
     try {
       final response = await http.post(
         Uri.parse(_webhookUrl),
@@ -233,23 +217,48 @@ class _MainScreenState extends State<MainScreen> {
         body: payload,
       );
 
-      final responseBody = response.body.isEmpty ? "No response body" : response.body.trim();
-      final logStatus = (response.statusCode >= 200 && response.statusCode < 300) ? "Success" : "Error";
-      _addLog(logStatus, "Webhook (${response.statusCode}): $responseBody");
+      // Parse Webhook Response for Eye-Catching Logs
+      String logMessage = "Empty response";
+      String logStatus = (response.statusCode >= 200 && response.statusCode < 300) ? "Webhook" : "Error";
+      
+      if (response.body.isNotEmpty) {
+        try {
+          dynamic decoded = jsonDecode(response.body);
+          
+          // Handle if it's wrapped in a list
+          if (decoded is List && decoded.isNotEmpty) {
+            decoded = decoded[0];
+          }
+
+          if (decoded is Map) {
+            // Try to find data in 'data' object or root
+            dynamic dataNode = decoded['data'] is Map ? decoded['data'] : decoded;
+            
+            int successCount = dataNode['success_count'] ?? 0;
+            int failedCount = dataNode['failed_count'] ?? 0;
+            
+            // Eye-catching format
+            logMessage = " Success: $successCount  | Failed: $failedCount";
+          } else {
+            logMessage = response.body.trim(); // Fallback
+          }
+        } catch (e) {
+          // If parsing fails, just show trimmed body or error
+          logMessage = "Invalid JSON response";
+        }
+      }
+
+      _addLog(logStatus, "(${response.statusCode}) $logMessage");
+      
     } catch (e) {
       _addLog("Error", "Connection error: $e");
     }
 
-    // 4. Save everything to disk (Current State)
     await _saveData();
     
-    // 5. Clear inputs and generate NEW password for next entry
     _usernameController.clear();
     _cookiesController.clear();
-    
-    // This generates a new password and saves it as the "current" password
     _generatePassword(); 
-    
     _addLog("System", "Password changed for next entry");
   }
 
@@ -271,7 +280,6 @@ class _MainScreenState extends State<MainScreen> {
     }
 
     try {
-      // Request MANAGE_EXTERNAL_STORAGE (All files access)
       var permission = await Permission.manageExternalStorage.status;
       if (!permission.isGranted) {
         permission = await Permission.manageExternalStorage.request();
@@ -281,11 +289,9 @@ class _MainScreenState extends State<MainScreen> {
       String displayPath;
 
       if (permission.isGranted) {
-        // Public Downloads folder
         saveDir = Directory('/storage/emulated/0/Download/insta_saver');
         displayPath = '/storage/emulated/0/Download/insta_saver/$_jsonFilename';
       } else {
-        // Fallback to app-private Downloads
         final Directory? privateDir = await getDownloadsDirectory();
         if (privateDir == null) {
           _addLog("Error", "Could not access any storage directory");
@@ -464,7 +470,9 @@ class _MainScreenState extends State<MainScreen> {
                     itemCount: _logs.length,
                     itemBuilder: (context, index) {
                       final log = _logs[index];
-                      final isError = log['status'] == "Error";
+                      final isError = log['status'] == "Error" || log['status'] == "Warning";
+                      final isWebhook = log['status'] == "Webhook";
+                      
                       return ListTile(
                         dense: true,
                         contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
@@ -474,7 +482,11 @@ class _MainScreenState extends State<MainScreen> {
                         ),
                         title: Text(
                           "${log['status']}: ${log['message']}",
-                          style: TextStyle(fontSize: 12, color: isError ? Colors.redAccent : Colors.greenAccent),
+                          style: TextStyle(
+                            fontSize: 12, 
+                            color: isError ? Colors.redAccent : (isWebhook ? Colors.cyanAccent : Colors.greenAccent),
+                            fontWeight: isWebhook ? FontWeight.bold : FontWeight.normal,
+                          ),
                         ),
                       );
                     },
@@ -533,12 +545,34 @@ class _MainScreenState extends State<MainScreen> {
                     onPressed: _exportToFile,
                     tooltip: "Export to public Downloads (requires 'All files access')",
                   ),
+                  // --- UPDATED: Added Confirmation Dialog for Delete All ---
                   IconButton(
                     icon: const Icon(Icons.delete_sweep, color: Colors.red),
-                    onPressed: () {
-                      setState(() => _accounts.clear());
-                      _saveData();
-                      _addLog("System", "All accounts cleared");
+                    onPressed: () async {
+                      final confirm = await showDialog<bool>(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          backgroundColor: const Color(0xff1f2937),
+                          title: const Text("Delete All Accounts", style: TextStyle(color: Colors.white)),
+                          content: const Text("Are you sure you want to delete ALL saved accounts? This cannot be undone.", style: TextStyle(color: Color(0xffe5e7eb))),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              child: const Text("Cancel", style: TextStyle(color: Color(0xff94a3b8))),
+                            ),
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              child: const Text("Delete All", style: TextStyle(color: Colors.redAccent)),
+                            ),
+                          ],
+                        ),
+                      );
+
+                      if (confirm == true) {
+                        setState(() => _accounts.clear());
+                        _saveData();
+                        _addLog("System", "All accounts cleared");
+                      }
                     },
                     tooltip: "Clear All",
                   ),
@@ -567,18 +601,41 @@ class _MainScreenState extends State<MainScreen> {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text(
-                                  acc['username'] ?? "Unknown",
-                                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16),
+                                Expanded(
+                                  child: Text(
+                                    acc['username'] ?? "Unknown",
+                                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16),
+                                  ),
                                 ),
                                 IconButton(
                                   padding: EdgeInsets.zero,
                                   constraints: const BoxConstraints(),
                                   icon: const Icon(Icons.close, color: Colors.red, size: 20),
-                                  onPressed: () {
-                                    setState(() => _accounts.removeAt(index));
-                                    _saveData();
-                                    _addLog("System", "Account deleted");
+                                  onPressed: () async {
+                                    final confirm = await showDialog<bool>(
+                                      context: context,
+                                      builder: (context) => AlertDialog(
+                                        backgroundColor: const Color(0xff1f2937),
+                                        title: const Text("Delete Account", style: TextStyle(color: Colors.white)),
+                                        content: const Text("Are you sure you want to delete this account?", style: TextStyle(color: Color(0xffe5e7eb))),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () => Navigator.pop(context, false),
+                                            child: const Text("Cancel", style: TextStyle(color: Color(0xff94a3b8))),
+                                          ),
+                                          TextButton(
+                                            onPressed: () => Navigator.pop(context, true),
+                                            child: const Text("Delete", style: TextStyle(color: Colors.redAccent)),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+
+                                    if (confirm == true) {
+                                      setState(() => _accounts.removeAt(index));
+                                      _saveData();
+                                      _addLog("System", "Account deleted");
+                                    }
                                   },
                                 )
                               ],
@@ -630,7 +687,6 @@ class _MainScreenState extends State<MainScreen> {
             width: double.infinity,
             child: OutlinedButton(
               onPressed: () {
-                // Update variables from controllers
                 setState(() {
                   _webhookUrl = _webhookController.text.trim();
                   _jsonFilename = _filenameController.text.trim();
