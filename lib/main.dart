@@ -180,7 +180,7 @@ class _MainScreenState extends State<MainScreen> {
 
   void _copyPassword() {
     Clipboard.setData(ClipboardData(text: _currentPassword));
-    
+    _addLog("System", "Password copied successfully");
   }
 
   Future<void> _submitData() async {
@@ -487,7 +487,7 @@ class _MainScreenState extends State<MainScreen> {
                       final log = _logs[index];
                       final isError = log['status'] == "Error" || log['status'] == "Warning";
                       final isWebhook = log['status'] == "Webhook";
-                      final isBold = log['style'] == "bold"; // Check for bold style
+                      final isBold = log['style'] == "bold"; 
                       
                       // Determine Color
                       Color logColor;
@@ -507,11 +507,16 @@ class _MainScreenState extends State<MainScreen> {
                         contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
                         leading: Text(
                           log['time'],
-                          style: const TextStyle(fontSize: 10, color: Color(0xff94a3b8)),
+                          style: const TextStyle(
+                            fontFamily: 'monospace', // <--- ADDED MONO FONT HERE
+                            fontSize: 10, 
+                            color: Color(0xff94a3b8)
+                          ),
                         ),
                         title: Text(
                           "${log['status']}: ${log['message']}",
                           style: TextStyle(
+                            fontFamily: 'monospace', // <--- ADDED MONO FONT HERE
                             fontSize: 12, 
                             color: logColor,
                             fontWeight: fontWeight,
@@ -731,4 +736,4 @@ class _MainScreenState extends State<MainScreen> {
       ),
     );
   }
-}
+} 
