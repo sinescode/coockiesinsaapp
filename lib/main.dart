@@ -125,7 +125,8 @@ class _MainScreenState extends State<MainScreen> {
       if (accountsStr != null && accountsStr.isNotEmpty) {
         try {
           final List<dynamic> decoded = json.decode(accountsStr);
-          _accounts = decoded.map((e) => Map<String, String>.from(e)).toList();
+          var loadedList = decoded.map((e) => Map<String, String>.from(e)).toList();
+          _accounts = loadedList.reversed.toList();
         } catch (e) {
           _addLog("System", "Error loading saved accounts: $e");
         }
@@ -204,7 +205,7 @@ class _MainScreenState extends State<MainScreen> {
     };
 
     setState(() {
-      _accounts.add(newEntry);
+      _accounts.insert(0, newEntry);
     });
 
     String convertedStr = "$username:$password|||$cookies||";
