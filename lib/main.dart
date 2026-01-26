@@ -1,3 +1,81 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:intl/intl.dart';
+import 'package:permission_handler/permission_handler.dart';
+
+void main() {
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Cookies Account Manager',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        brightness: Brightness.dark,
+        primaryColor: const Color(0xff0f172a), // Slate 900
+        scaffoldBackgroundColor: const Color(0xff0f172a),
+        cardColor: const Color(0xff111827), // Slate 950
+        dividerColor: const Color(0xff1f2937),
+        textTheme: const TextTheme(
+          bodyMedium: TextStyle(color: Color(0xffe5e7eb)), // Slate 200
+          bodySmall: TextStyle(color: Color(0xff94a3b8)),  // Slate 400
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: const Color(0xff0b1220),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Color(0xff1f2937)),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Color(0xff1f2937)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Color(0xff3b82f6)),
+          ),
+          labelStyle: const TextStyle(color: Color(0xff94a3b8), fontSize: 12),
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xff22c55e), // Green 500
+            foregroundColor: const Color(0xff0b1220),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        ),
+        outlinedButtonTheme: OutlinedButtonThemeData(
+          style: OutlinedButton.styleFrom(
+            foregroundColor: const Color(0xfff97316), // Orange 500
+            side: const BorderSide(color: Color(0xfff97316)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        ),
+      ),
+      home: const MainScreen(),
+    );
+  }
+}
+
+class MainScreen extends StatefulWidget {
+  const MainScreen({super.key});
+
+  @override
+  State<MainScreen> createState() => _MainScreenState();
+}
+
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
   
