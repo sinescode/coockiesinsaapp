@@ -560,7 +560,18 @@ class _MainScreenState extends State<MainScreen> {
 
   // --- TAB 2: SAVED ---
 
+    // --- TAB 2: SAVED (UPDATED) ---
+
   Widget _buildSavedTab() {
+    // 1. Calculate frequency of each username
+    final Map<String, int> usernameCounts = {};
+    for (var acc in _accounts) {
+      final user = acc['username'] ?? "";
+      if (user.isNotEmpty) {
+        usernameCounts[user] = (usernameCounts[user] ?? 0) + 1;
+      }
+    }
+
     return Column(
       children: [
         Container(
@@ -623,8 +634,20 @@ class _MainScreenState extends State<MainScreen> {
                   itemCount: _accounts.length,
                   itemBuilder: (context, index) {
                     final acc = _accounts[index];
+                    final currentUsername = acc['username'] ?? "";
+
+                    // 2. Check if this username is a duplicate
+                    final bool isDuplicate = (usernameCounts[currentUsername] ?? 0) > 1;
+
+                    // 3. Set color based on duplicate status
+                    // Default: Slate 800 (0xff1f2937)
+                    // Duplicate: Red 900 (0xff7f1d1d) - Dark enough for white text
+                    final Color cardColor = isDuplicate 
+                        ? const Color(0xff7f1d1d) 
+                        : const Color(0xff1f2937);
+
                     return Card(
-                      color: const Color(0xff1f2937),
+                      color: cardColor,
                       margin: const EdgeInsets.only(bottom: 10),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       child: Padding(
@@ -636,9 +659,20 @@ class _MainScreenState extends State<MainScreen> {
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Expanded(
-                                  child: Text(
-                                    acc['username'] ?? "Unknown",
-                                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16),
+                                  child: Row(
+                                    children: [
+                                      // Optional: Add a warning icon if duplicate
+                                      if (isDuplicate) 
+                                        const Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent, size: 18),
+                                      if (isDuplicate) const SizedBox(width: 5),
+                                      
+                                      Flexible(
+                                        child: Text(
+                                          currentUsername,
+                                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                                 IconButton(
