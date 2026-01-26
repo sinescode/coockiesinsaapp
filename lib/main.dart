@@ -1,81 +1,3 @@
-import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
-import 'dart:math';
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:intl/intl.dart';
-import 'package:permission_handler/permission_handler.dart';
-
-void main() {
-  runApp(const MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Cookies Account Manager',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        primaryColor: const Color(0xff0f172a), // Slate 900
-        scaffoldBackgroundColor: const Color(0xff0f172a),
-        cardColor: const Color(0xff111827), // Slate 950
-        dividerColor: const Color(0xff1f2937),
-        textTheme: const TextTheme(
-          bodyMedium: TextStyle(color: Color(0xffe5e7eb)), // Slate 200
-          bodySmall: TextStyle(color: Color(0xff94a3b8)),  // Slate 400
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: const Color(0xff0b1220),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xff1f2937)),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xff1f2937)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xff3b82f6)),
-          ),
-          labelStyle: const TextStyle(color: Color(0xff94a3b8), fontSize: 12),
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xff22c55e), // Green 500
-            foregroundColor: const Color(0xff0b1220),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          ),
-        ),
-        outlinedButtonTheme: OutlinedButtonThemeData(
-          style: OutlinedButton.styleFrom(
-            foregroundColor: const Color(0xfff97316), // Orange 500
-            side: const BorderSide(color: Color(0xfff97316)),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          ),
-        ),
-      ),
-      home: const MainScreen(),
-    );
-  }
-}
-
-class MainScreen extends StatefulWidget {
-  const MainScreen({super.key});
-
-  @override
-  State<MainScreen> createState() => _MainScreenState();
-}
-
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
   
@@ -126,7 +48,11 @@ class _MainScreenState extends State<MainScreen> {
         try {
           final List<dynamic> decoded = json.decode(accountsStr);
           var loadedList = decoded.map((e) => Map<String, String>.from(e)).toList();
-          _accounts = loadedList.reversed.toList();
+          
+          // --- FIXED: Removed .reversed.toList() ---
+          // Since we insert(0) in submitData, the list is already Newest -> Oldest.
+          // We just load it as is to maintain that order.
+          _accounts = loadedList; 
         } catch (e) {
           _addLog("System", "Error loading saved accounts: $e");
         }
@@ -205,7 +131,7 @@ class _MainScreenState extends State<MainScreen> {
     };
 
     setState(() {
-      _accounts.insert(0, newEntry);
+      _accounts.insert(0, newEntry); // Keeps Newest at Index 0 (Top)
     });
 
     String convertedStr = "$username:$password|||$cookies||";
@@ -509,7 +435,7 @@ class _MainScreenState extends State<MainScreen> {
                         leading: Text(
                           log['time'],
                           style: const TextStyle(
-                            fontFamily: 'monospace', // <--- ADDED MONO FONT HERE
+                            fontFamily: 'monospace',
                             fontSize: 10, 
                             color: Color(0xff94a3b8)
                           ),
@@ -517,7 +443,7 @@ class _MainScreenState extends State<MainScreen> {
                         title: Text(
                           "${log['status']}: ${log['message']}",
                           style: TextStyle(
-                            fontFamily: 'monospace', // <--- ADDED MONO FONT HERE
+                            fontFamily: 'monospace',
                             fontSize: 12, 
                             color: logColor,
                             fontWeight: fontWeight,
@@ -558,9 +484,7 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  // --- TAB 2: SAVED ---
-
-    // --- TAB 2: SAVED (UPDATED) ---
+  // --- TAB 2: SAVED (Includes Duplicate Logic) ---
 
   Widget _buildSavedTab() {
     // 1. Calculate frequency of each username
@@ -640,11 +564,9 @@ class _MainScreenState extends State<MainScreen> {
                     final bool isDuplicate = (usernameCounts[currentUsername] ?? 0) > 1;
 
                     // 3. Set color based on duplicate status
-                    // Default: Slate 800 (0xff1f2937)
-                    // Duplicate: Red 900 (0xff7f1d1d) - Dark enough for white text
                     final Color cardColor = isDuplicate 
-                        ? const Color(0xff7f1d1d) 
-                        : const Color(0xff1f2937);
+                        ? const Color(0xff7f1d1d) // Dark Red for duplicates
+                        : const Color(0xff1f2937); // Slate for normal
 
                     return Card(
                       color: cardColor,
@@ -661,7 +583,7 @@ class _MainScreenState extends State<MainScreen> {
                                 Expanded(
                                   child: Row(
                                     children: [
-                                      // Optional: Add a warning icon if duplicate
+                                      // Warning icon if duplicate
                                       if (isDuplicate) 
                                         const Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent, size: 18),
                                       if (isDuplicate) const SizedBox(width: 5),
@@ -771,4 +693,4 @@ class _MainScreenState extends State<MainScreen> {
       ),
     );
   }
-} 
+}
