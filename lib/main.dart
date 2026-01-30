@@ -309,7 +309,9 @@ class _MainScreenState extends State<MainScreen> {
     try {
       var permission = await Permission.manageExternalStorage.status;
       if (!permission.isGranted) {
-        permission = await Permission.manageExternalStorage.request();
+        permission = await Permission.manage
+
+ExternalStorage.request();
       }
 
       Directory saveDir;
@@ -653,6 +655,12 @@ class _MainScreenState extends State<MainScreen> {
                         ? const Color(0xff7f1d1d) // Dark Red for duplicates
                         : const Color(0xff1f2937); // Slate for normal
 
+                    // Compute cookies display safely
+                    final String authCode = acc['auth_code'] ?? '';
+                    final String cookiesDisplay = authCode.isEmpty 
+                        ? 'None' 
+                        : '${authCode.substring(0, min(authCode.length, 30))}...';
+
                     return Card(
                       color: cardColor,
                       margin: const EdgeInsets.only(bottom: 10),
@@ -718,13 +726,10 @@ class _MainScreenState extends State<MainScreen> {
                             const SizedBox(height: 8),
                             Text("Password: ${acc['password'] ?? 'N/A'}", style: const TextStyle(color: Color(0xff94a3b8), fontSize: 13)),
                             const SizedBox(height: 4),
-                            (() {
-                              final String authCode = acc['auth_code'] ?? '';
-                              return Text(
-                                "Cookies: ${authCode.isEmpty ? 'None' : '${authCode.substring(0, authCode.length < 30 ? authCode.length : 30)}...'}",
-                                style: const TextStyle(color: Color(0xff94a3b8), fontSize: 11),
-                              );
-                            })();
+                            Text(
+                              "Cookies: $cookiesDisplay",
+                              style: const TextStyle(color: Color(0xff94a3b8), fontSize: 11),
+                            ),
                           ],
                         ),
                       ),
