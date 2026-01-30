@@ -163,7 +163,7 @@ class _MainScreenState extends State<MainScreen> {
   Future<void> _saveData() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('webhook_url', _webhookUrl);
-    await prefs.setString('json_filename', _jsonFilename);
+    await prefs.setString('json_filename', __CLA jsonFilename);
     await prefs.setString('current_password', _currentPassword);
     await prefs.setString('accounts_list', json.encode(_accounts));
     await prefs.setString('logs_list', json.encode(_logs));
@@ -264,7 +264,7 @@ class _MainScreenState extends State<MainScreen> {
             _addLog(logStatus, "(${response.statusCode}) $logMessage", style: logStyle);
           } else {
             logMessage = response.body.trim(); // Fallback
-            _addLog(logStatus, "(${response.statusCode}) $logMessage");
+            _addLog(logStatus, "(${response.statusCode}) $logString");
           }
         } catch (e) {
           // If parsing fails, just show trimmed body or error
@@ -309,9 +309,7 @@ class _MainScreenState extends State<MainScreen> {
     try {
       var permission = await Permission.manageExternalStorage.status;
       if (!permission.isGranted) {
-        permission = await Permission.manage
-
-ExternalStorage.request();
+        permission = await Permission.manageExternalStorage.request();
       }
 
       Directory saveDir;
@@ -436,7 +434,9 @@ ExternalStorage.request();
                   ),
                   const SizedBox(width: 5),
                   _buildSmallBtn("Copy", _copyPassword),
-                  const SizedBox(width: 5),
+                  const
+
+ SizedBox(width: 5),
                   _buildSmallBtn("Change", _generatePassword),
                 ],
               ),
@@ -456,7 +456,7 @@ ExternalStorage.request();
                     _cookiesController.clear();
                   },
                   child: const Text("Clear Inputs"),
-                ),
+ "¿                ),
               ),
               const SizedBox(width: 10),
               Expanded(
