@@ -120,30 +120,37 @@ class _MainScreenState extends State<MainScreen> {
       _filenameController.text = _jsonFilename;
       _passwordController.text = _currentPassword;
 
-      // Load Accounts
-      String? accountsStr = prefs.getString('accounts_list');
-      if (accountsStr != null && accountsStr.isNotEmpty) {
-        try {
-          final List<dynamic> decoded = json.decode(accountsStr);
-          var loadedList = decoded.map((e) => Map<String, String>.from(e)).toList();
-          
-          // --- FIXED: Removed .reversed.toList() ---
-          // Since we insert(0) in submitData, the list is already Newest -> Oldest.
-          // We just load it as is to maintain that order.
-          _accounts = loadedList; 
-        } catch (e) {
-          _addLog("System", "Error loading saved accounts: $e");
-        }
-      }
-
-      // Load Logs
+      // Load Logs FIRST (so any account loading errors are visible)
       String? logsStr = prefs.getString('logs_list');
       if (logsStr != null && logsStr.isNotEmpty) {
         try {
           final List<dynamic> decoded = json.decode(logsStr);
           _logs = decoded.map((e) => Map<String, dynamic>.from(e)).toList();
         } catch (e) {
-          print("Error loading logs: $e");
+          _addLog("System", "Error loading saved logs: $e");
+        }
+      }
+
+      // Load Accounts (robust handling for old/incompatible data)
+      String? accountsStr = prefs.getString('accounts_list');
+      if (accountsStr != null && accountsStr.isNotEmpty) {
+        try {
+          final List<dynamic> decoded = json.decode(accountsStr);
+          final List<Map<String, String>> loadedList = [];
+          for (var e in decoded) {
+            if (e is Map<String, dynamic>) {
+              loadedList.add({
+                "email": (e['email']?.toString() ?? ""),
+                "username": (e['username']?.toString() ?? ""),
+                "password": (e['password']?.toString() ?? ""),
+                "auth_code": (e['auth_code']?.toString() ?? ""),
+              });
+            }
+          }
+          _accounts = loadedList;
+        } catch (e) {
+          _addLog("System", "Error loading saved accounts: $e");
+          _accounts = []; // Ensure empty on failure
         }
       }
     });
@@ -636,7 +643,7 @@ class _MainScreenState extends State<MainScreen> {
                   itemCount: _accounts.length,
                   itemBuilder: (context, index) {
                     final acc = _accounts[index];
-                    final currentUsername = acc['username'] ?? "";
+                    final currentUsername = acc['username'] ?? "Unknown";
 
                     // 2. Check if this username is a duplicate
                     final bool isDuplicate = (usernameCounts[currentUsername] ?? 0) > 1;
@@ -709,12 +716,15 @@ class _MainScreenState extends State<MainScreen> {
                               ],
                             ),
                             const SizedBox(height: 8),
-                            Text("Password: ${acc['password']}", style: const TextStyle(color: Color(0xff94a3b8), fontSize: 13)),
+                            Text("Password: ${acc['password'] ?? 'N/A'}", style: const TextStyle(color: Color(0xff94a3b8), fontSize: 13)),
                             const SizedBox(height: 4),
-                            Text(
-                              "Cookies: ${acc['auth_code']?.isEmpty == true ? 'None' : '${acc['auth_code']!.substring(0, acc['auth_code']!.length < 30 ? acc['auth_code']!.length : 30)}...'}",
-                              style: const TextStyle(color: Color(0xff94a3b8), fontSize: 11),
-                            ),
+                            (() {
+                              final String authCode = acc['auth_code'] ?? '';
+                              return Text(
+                                "Cookies: ${authCode.isEmpty ? 'None' : '${authCode.substring(0, authCode.length < 30 ? authCode.length : 30)}...'}",
+                                style: const TextStyle(color: Color(0xff94a3b8), fontSize: 11),
+                              );
+                            })();
                           ],
                         ),
                       ),
