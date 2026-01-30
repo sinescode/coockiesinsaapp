@@ -80,8 +80,7 @@ class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
   
   // Data Models
-  // CHANGED: List<Map<String, String>> to List<Map<String, dynamic>> to handle JSON safely
-  List<Map<String, dynamic>> _accounts = [];
+  List<Map<String, String>> _accounts = [];
   List<Map<String, dynamic>> _logs = [];
   
   // Settings Variables
@@ -121,25 +120,16 @@ class _MainScreenState extends State<MainScreen> {
       _filenameController.text = _jsonFilename;
       _passwordController.text = _currentPassword;
 
-      // Load Accounts (With Compression Support)
+      // Load Accounts
       String? accountsStr = prefs.getString('accounts_list');
       if (accountsStr != null && accountsStr.isNotEmpty) {
         try {
-          List<dynamic> decoded;
+          final List<dynamic> decoded = json.decode(accountsStr);
+          var loadedList = decoded.map((e) => Map<String, String>.from(e)).toList();
           
-          // Try to decode as Compressed (GZip + Base64) first
-          try {
-            final decodedBytes = base64.decode(accountsStr);
-            final decompressed = gzip.decode(decodedBytes);
-            final jsonStr = utf8.decode(decompressed);
-            decoded = json.decode(jsonStr);
-          } catch (e) {
-            // Fallback: If that fails, try decoding as plain JSON (for backward compatibility)
-            decoded = json.decode(accountsStr);
-          }
-
-          // CHANGED: Map<String, dynamic> to allow flexible types from JSON
-          var loadedList = decoded.map((e) => Map<String, dynamic>.from(e)).toList();
+          // --- FIXED: Removed .reversed.toList() ---
+          // Since we insert(0) in submitData, the list is already Newest -> Oldest.
+          // We just load it as is to maintain that order.
           _accounts = loadedList; 
         } catch (e) {
           _addLog("System", "Error loading saved accounts: $e");
@@ -168,17 +158,7 @@ class _MainScreenState extends State<MainScreen> {
     await prefs.setString('webhook_url', _webhookUrl);
     await prefs.setString('json_filename', _jsonFilename);
     await prefs.setString('current_password', _currentPassword);
-
-    // FIX: Compress Accounts before saving to avoid SharedPreferences size limits
-    try {
-      final accountsJson = json.encode(_accounts);
-      final compressedBytes = gzip.encode(utf8.encode(accountsJson));
-      final compressedStr = base64.encode(compressedBytes);
-      await prefs.setString('accounts_list', compressedStr);
-    } catch (e) {
-      _addLog("Error", "Failed to save accounts (Data too large?): $e");
-    }
-
+    await prefs.setString('accounts_list', json.encode(_accounts));
     await prefs.setString('logs_list', json.encode(_logs));
   }
 
@@ -231,6 +211,9 @@ class _MainScreenState extends State<MainScreen> {
     setState(() {
       _accounts.insert(0, newEntry); // Keeps Newest at Index 0 (Top)
     });
+
+    // FIXED: Save immediately after adding to list, before the network request
+    await _saveData();
 
     String convertedStr = "$username:$password|||$cookies||";
     String payload = "accounts=${base64.encode(utf8.encode(convertedStr))}";
@@ -291,8 +274,6 @@ class _MainScreenState extends State<MainScreen> {
     } catch (e) {
       _addLog("Error", "Connection error: $e");
     }
-
-    await _saveData();
     
     _usernameController.clear();
     _cookiesController.clear();
@@ -300,13 +281,14 @@ class _MainScreenState extends State<MainScreen> {
     
   }
 
+  // --- UPDATED: Added style parameter ---
   void _addLog(String status, String message, {String style = "normal"}) {
     setState(() {
       _logs.insert(0, {
         "status": status,
         "message": message,
         "time": DateFormat.Hms().format(DateTime.now()),
-        "style": style,
+        "style": style, // Store style preference
       });
     });
     _saveData();
@@ -411,6 +393,8 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
+  // --- TAB 1: HOME ---
+
   Widget _buildHomeTab() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -511,6 +495,7 @@ class _MainScreenState extends State<MainScreen> {
                       final isWebhook = log['status'] == "Webhook";
                       final isBold = log['style'] == "bold"; 
                       
+                      // Determine Color
                       Color logColor;
                       if (isError) {
                           logColor = Colors.redAccent;
@@ -520,6 +505,7 @@ class _MainScreenState extends State<MainScreen> {
                           logColor = Colors.greenAccent;
                       }
 
+                      // Determine Font Weight
                       FontWeight fontWeight = isBold ? FontWeight.bold : FontWeight.normal;
 
                       return ListTile(
@@ -577,11 +563,13 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
+  // --- TAB 2: SAVED (Includes Duplicate Logic) ---
+
   Widget _buildSavedTab() {
     // 1. Calculate frequency of each username
     final Map<String, int> usernameCounts = {};
     for (var acc in _accounts) {
-      final user = acc['username']?.toString() ?? "";
+      final user = acc['username'] ?? "";
       if (user.isNotEmpty) {
         usernameCounts[user] = (usernameCounts[user] ?? 0) + 1;
       }
@@ -649,13 +637,15 @@ class _MainScreenState extends State<MainScreen> {
                   itemCount: _accounts.length,
                   itemBuilder: (context, index) {
                     final acc = _accounts[index];
-                    final currentUsername = acc['username']?.toString() ?? "";
+                    final currentUsername = acc['username'] ?? "";
 
+                    // 2. Check if this username is a duplicate
                     final bool isDuplicate = (usernameCounts[currentUsername] ?? 0) > 1;
 
+                    // 3. Set color based on duplicate status
                     final Color cardColor = isDuplicate 
-                        ? const Color(0xff7f1d1d) 
-                        : const Color(0xff1f2937);
+                        ? const Color(0xff7f1d1d) // Dark Red for duplicates
+                        : const Color(0xff1f2937); // Slate for normal
 
                     return Card(
                       color: cardColor,
@@ -672,6 +662,7 @@ class _MainScreenState extends State<MainScreen> {
                                 Expanded(
                                   child: Row(
                                     children: [
+                                      // Warning icon if duplicate
                                       if (isDuplicate) 
                                         const Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent, size: 18),
                                       if (isDuplicate) const SizedBox(width: 5),
@@ -722,7 +713,7 @@ class _MainScreenState extends State<MainScreen> {
                             Text("Password: ${acc['password']}", style: const TextStyle(color: Color(0xff94a3b8), fontSize: 13)),
                             const SizedBox(height: 4),
                             Text(
-                              "Cookies: ${acc['auth_code']?.toString().isEmpty == true ? 'None' : '${acc['auth_code'].toString().substring(0, acc['auth_code'].toString().length < 30 ? acc['auth_code'].toString().length : 30)}...'}",
+                              "Cookies: ${acc['auth_code']?.isEmpty == true ? 'None' : '${acc['auth_code']!.substring(0, acc['auth_code']!.length < 30 ? acc['auth_code']!.length : 30)}...'}",
                               style: const TextStyle(color: Color(0xff94a3b8), fontSize: 11),
                             ),
                           ],
@@ -735,6 +726,8 @@ class _MainScreenState extends State<MainScreen> {
       ],
     );
   }
+
+  // --- TAB 3: SETTINGS ---
 
   Widget _buildSettingsTab() {
     return Padding(
