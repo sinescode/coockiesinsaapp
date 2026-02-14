@@ -88,6 +88,10 @@ class _MainScreenState extends State<MainScreen> {
   String _jsonFilename = "accounts.json";
   String _currentPassword = "";
   
+  // Server Status Variables
+  String _serverStatus = "Check"; // "Check", "Checking...", "ON", "OFF"
+  bool _isChecking = false;
+
   // Input Controllers
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
@@ -126,10 +130,6 @@ class _MainScreenState extends State<MainScreen> {
         try {
           final List<dynamic> decoded = json.decode(accountsStr);
           var loadedList = decoded.map((e) => Map<String, String>.from(e)).toList();
-          
-          // --- FIXED: Removed .reversed.toList() ---
-          // Since we insert(0) in submitData, the list is already Newest -> Oldest.
-          // We just load it as is to maintain that order.
           _accounts = loadedList; 
         } catch (e) {
           _addLog("System", "Error loading saved accounts: $e");
@@ -188,6 +188,83 @@ class _MainScreenState extends State<MainScreen> {
     _addLog("System", "Password copied successfully");
   }
 
+  // --- NEW: Server Check Logic ---
+  Future<void> _checkServerStatus() async {
+    if (_webhookUrl.isEmpty || !_webhookUrl.startsWith("http")) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please set a valid Webhook URL in Settings first."), backgroundColor: Colors.orange),
+      );
+      return;
+    }
+
+    setState(() {
+      _isChecking = true;
+      _serverStatus = "Checking...";
+    });
+
+    // Generate Random Data
+    const chars = "abcdefghijklmnopqrstuvwxyz1234567890";
+    final random = Random();
+    
+    String randomUser = List.generate(8, (index) => chars[random.nextInt(chars.length)]).join();
+    String randomPass = List.generate(8, (index) => chars[random.nextInt(chars.length)]).join();
+    String randomCookie = List.generate(10, (index) => chars[random.nextInt(chars.length)]).join();
+
+    String convertedStr = "$randomUser:$randomPass|||$randomCookie||";
+    String payload = "accounts=${base64.encode(utf8.encode(convertedStr))}";
+
+    try {
+      // Send request with timeout
+      final response = await http.post(
+        Uri.parse(_webhookUrl),
+        headers: {'Content-Type': 'text/plain'},
+        body: payload,
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.body.isNotEmpty) {
+        try {
+          dynamic decoded = jsonDecode(response.body);
+          
+          // Handle if it's wrapped in a list
+          if (decoded is List && decoded.isNotEmpty) {
+            decoded = decoded[0];
+          }
+
+          if (decoded is Map) {
+            dynamic dataNode = decoded['data'] is Map ? decoded['data'] : decoded;
+            
+            int successCount = dataNode['success_count'] ?? 0;
+            int failedCount = dataNode['failed_count'] ?? 0;
+
+            // LOGIC IMPLEMENTED HERE
+            setState(() {
+              if (failedCount > 0 && successCount == 0) {
+                _serverStatus = "ON"; // Server processed bad data and failed it -> ON
+              } else if (failedCount == 0 && successCount == 0) {
+                _serverStatus = "OFF"; // Server returned 0/0 -> OFF
+              } else {
+                // Fallback for other scenarios (like success > 0)
+                _serverStatus = "ON"; 
+              }
+            });
+          } else {
+             setState(() => _serverStatus = "OFF");
+          }
+        } catch (e) {
+          setState(() => _serverStatus = "OFF"); // Invalid JSON
+        }
+      } else {
+        setState(() => _serverStatus = "OFF"); // Empty body
+      }
+
+    } catch (e) {
+      // Timeout or Connection Error
+      setState(() => _serverStatus = "OFF");
+    } finally {
+      setState(() => _isChecking = false);
+    }
+  }
+
   Future<void> _submitData() async {
     final username = _usernameController.text.trim();
     final password = _passwordController.text.trim(); 
@@ -209,10 +286,9 @@ class _MainScreenState extends State<MainScreen> {
     };
 
     setState(() {
-      _accounts.insert(0, newEntry); // Keeps Newest at Index 0 (Top)
+      _accounts.insert(0, newEntry); 
     });
 
-    // FIXED: Save immediately after adding to list, before the network request
     await _saveData();
 
     String convertedStr = "$username:$password|||$cookies||";
@@ -225,45 +301,34 @@ class _MainScreenState extends State<MainScreen> {
         body: payload,
       );
 
-      // Parse Webhook Response for Eye-Catching Logs
       String logMessage = "Empty response";
       String logStatus = (response.statusCode >= 200 && response.statusCode < 300) ? "Webhook" : "Error";
       
       if (response.body.isNotEmpty) {
         try {
           dynamic decoded = jsonDecode(response.body);
-          
-          // Handle if it's wrapped in a list
-          if (decoded is List && decoded.isNotEmpty) {
-            decoded = decoded[0];
-          }
+          if (decoded is List && decoded.isNotEmpty) decoded = decoded[0];
 
           if (decoded is Map) {
-            // Try to find data in 'data' object or root
             dynamic dataNode = decoded['data'] is Map ? decoded['data'] : decoded;
-            
             int successCount = dataNode['success_count'] ?? 0;
             int failedCount = dataNode['failed_count'] ?? 0;
             
-            // Eye-catching format
             logMessage = " Success: $successCount  | Failed: $failedCount";
 
-            // --- UPDATED LOGIC: Color and Boldness based on counts ---
             String logStyle = "normal";
             if (successCount == 0) {
-               logStatus = "Error"; // Triggers Red color
+               logStatus = "Error"; 
             } else if (failedCount == 0) {
-               logStyle = "bold";   // Triggers Bold text
+               logStyle = "bold";   
             }
-            // ---------------------------------------------------------
 
             _addLog(logStatus, "(${response.statusCode}) $logMessage", style: logStyle);
           } else {
-            logMessage = response.body.trim(); // Fallback
+            logMessage = response.body.trim(); 
             _addLog(logStatus, "(${response.statusCode}) $logMessage");
           }
         } catch (e) {
-          // If parsing fails, just show trimmed body or error
           logMessage = "Invalid JSON response";
           _addLog(logStatus, "(${response.statusCode}) $logMessage");
         }
@@ -281,14 +346,13 @@ class _MainScreenState extends State<MainScreen> {
     
   }
 
-  // --- UPDATED: Added style parameter ---
   void _addLog(String status, String message, {String style = "normal"}) {
     setState(() {
       _logs.insert(0, {
         "status": status,
         "message": message,
         "time": DateFormat.Hms().format(DateTime.now()),
-        "style": style, // Store style preference
+        "style": style, 
       });
     });
     _saveData();
@@ -369,6 +433,41 @@ class _MainScreenState extends State<MainScreen> {
         title: const Text("Account Manager", style: TextStyle(color: Colors.white)),
         backgroundColor: const Color(0xff111827),
         elevation: 0,
+        actions: [
+          // --- NEW: Server Status Indicator ---
+          Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              margin: const EdgeInsets.only(right: 8),
+              decoration: BoxDecoration(
+                color: _serverStatus == "ON" ? Colors.green.withOpacity(0.2) : 
+                       _serverStatus == "OFF" ? Colors.red.withOpacity(0.2) : 
+                       Colors.grey.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                _serverStatus,
+                style: TextStyle(
+                  color: _serverStatus == "ON" ? Colors.greenAccent : 
+                         _serverStatus == "OFF" ? Colors.redAccent : 
+                         Colors.grey,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12
+                ),
+              ),
+            ),
+          ),
+          _isChecking 
+            ? const Padding(
+                padding: EdgeInsets.all(16.0), 
+                child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              )
+            : IconButton(
+                icon: const Icon(Icons.refresh, color: Colors.white),
+                onPressed: _checkServerStatus,
+                tooltip: "Check Server Status",
+              ),
+        ],
       ),
       body: IndexedStack(
         index: _currentIndex,
@@ -495,7 +594,6 @@ class _MainScreenState extends State<MainScreen> {
                       final isWebhook = log['status'] == "Webhook";
                       final isBold = log['style'] == "bold"; 
                       
-                      // Determine Color
                       Color logColor;
                       if (isError) {
                           logColor = Colors.redAccent;
@@ -505,7 +603,6 @@ class _MainScreenState extends State<MainScreen> {
                           logColor = Colors.greenAccent;
                       }
 
-                      // Determine Font Weight
                       FontWeight fontWeight = isBold ? FontWeight.bold : FontWeight.normal;
 
                       return ListTile(
@@ -563,10 +660,9 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  // --- TAB 2: SAVED (Includes Duplicate Logic) ---
+  // --- TAB 2: SAVED ---
 
   Widget _buildSavedTab() {
-    // 1. Calculate frequency of each username
     final Map<String, int> usernameCounts = {};
     for (var acc in _accounts) {
       final user = acc['username'] ?? "";
@@ -592,7 +688,7 @@ class _MainScreenState extends State<MainScreen> {
                   IconButton(
                     icon: const Icon(Icons.download, color: Color(0xff22c55e)),
                     onPressed: _exportToFile,
-                    tooltip: "Export to public Downloads (requires 'All files access')",
+                    tooltip: "Export to public Downloads",
                   ),
                   IconButton(
                     icon: const Icon(Icons.delete_sweep, color: Colors.red),
@@ -602,7 +698,7 @@ class _MainScreenState extends State<MainScreen> {
                         builder: (context) => AlertDialog(
                           backgroundColor: const Color(0xff1f2937),
                           title: const Text("Delete All Accounts", style: TextStyle(color: Colors.white)),
-                          content: const Text("Are you sure you want to delete ALL saved accounts? This cannot be undone.", style: TextStyle(color: Color(0xffe5e7eb))),
+                          content: const Text("Are you sure you want to delete ALL saved accounts?", style: TextStyle(color: Color(0xffe5e7eb))),
                           actions: [
                             TextButton(
                               onPressed: () => Navigator.pop(context, false),
@@ -638,14 +734,10 @@ class _MainScreenState extends State<MainScreen> {
                   itemBuilder: (context, index) {
                     final acc = _accounts[index];
                     final currentUsername = acc['username'] ?? "";
-
-                    // 2. Check if this username is a duplicate
                     final bool isDuplicate = (usernameCounts[currentUsername] ?? 0) > 1;
-
-                    // 3. Set color based on duplicate status
                     final Color cardColor = isDuplicate 
-                        ? const Color(0xff7f1d1d) // Dark Red for duplicates
-                        : const Color(0xff1f2937); // Slate for normal
+                        ? const Color(0xff7f1d1d) 
+                        : const Color(0xff1f2937);
 
                     return Card(
                       color: cardColor,
@@ -662,7 +754,6 @@ class _MainScreenState extends State<MainScreen> {
                                 Expanded(
                                   child: Row(
                                     children: [
-                                      // Warning icon if duplicate
                                       if (isDuplicate) 
                                         const Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent, size: 18),
                                       if (isDuplicate) const SizedBox(width: 5),
@@ -686,7 +777,7 @@ class _MainScreenState extends State<MainScreen> {
                                       builder: (context) => AlertDialog(
                                         backgroundColor: const Color(0xff1f2937),
                                         title: const Text("Delete Account", style: TextStyle(color: Colors.white)),
-                                        content: const Text("Are you sure you want to delete this account?", style: TextStyle(color: Color(0xffe5e7eb))),
+                                        content: const Text("Are you sure?", style: TextStyle(color: Color(0xffe5e7eb))),
                                         actions: [
                                           TextButton(
                                             onPressed: () => Navigator.pop(context, false),
