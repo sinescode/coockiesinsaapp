@@ -9,6 +9,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:share_plus/share_plus.dart'; // NEW IMPORT
+import 'security_module.dart'; // Import the security module
 
 void main() {
   runApp(const MyApp());
@@ -24,13 +26,13 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,
-        primaryColor: const Color(0xff0f172a), // Slate 900
+        primaryColor: const Color(0xff0f172a),
         scaffoldBackgroundColor: const Color(0xff0f172a),
-        cardColor: const Color(0xff111827), // Slate 950
+        cardColor: const Color(0xff111827),
         dividerColor: const Color(0xff1f2937),
         textTheme: const TextTheme(
-          bodyMedium: TextStyle(color: Color(0xffe5e7eb)), // Slate 200
-          bodySmall: TextStyle(color: Color(0xff94a3b8)),  // Slate 400
+          bodyMedium: TextStyle(color: Color(0xffe5e7eb)),
+          bodySmall: TextStyle(color: Color(0xff94a3b8)),
         ),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
@@ -51,14 +53,14 @@ class MyApp extends StatelessWidget {
         ),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xff22c55e), // Green 500
+            backgroundColor: const Color(0xff22c55e),
             foregroundColor: const Color(0xff0b1220),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
         ),
         outlinedButtonTheme: OutlinedButtonThemeData(
           style: OutlinedButton.styleFrom(
-            foregroundColor: const Color(0xfff97316), // Orange 500
+            foregroundColor: const Color(0xfff97316),
             side: const BorderSide(color: Color(0xfff97316)),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
@@ -89,7 +91,7 @@ class _MainScreenState extends State<MainScreen> {
   String _currentPassword = "";
   
   // Server Status Variables
-  String _serverStatus = "Check"; // "Check", "Checking...", "ON", "OFF"
+  String _serverStatus = "Check"; 
   bool _isChecking = false;
 
   // Input Controllers
@@ -110,7 +112,6 @@ class _MainScreenState extends State<MainScreen> {
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
     
-    // 1. Load Settings
     final savedWebhook = prefs.getString('webhook_url');
     final savedFilename = prefs.getString('json_filename');
     final savedPassword = prefs.getString('current_password');
@@ -124,19 +125,16 @@ class _MainScreenState extends State<MainScreen> {
       _filenameController.text = _jsonFilename;
       _passwordController.text = _currentPassword;
 
-      // Load Accounts
       String? accountsStr = prefs.getString('accounts_list');
       if (accountsStr != null && accountsStr.isNotEmpty) {
         try {
           final List<dynamic> decoded = json.decode(accountsStr);
-          var loadedList = decoded.map((e) => Map<String, String>.from(e)).toList();
-          _accounts = loadedList; 
+          _accounts = decoded.map((e) => Map<String, String>.from(e)).toList();
         } catch (e) {
           _addLog("System", "Error loading saved accounts: $e");
         }
       }
 
-      // Load Logs
       String? logsStr = prefs.getString('logs_list');
       if (logsStr != null && logsStr.isNotEmpty) {
         try {
@@ -188,7 +186,6 @@ class _MainScreenState extends State<MainScreen> {
     _addLog("System", "Password copied successfully");
   }
 
-  // --- NEW: Server Check Logic ---
   Future<void> _checkServerStatus() async {
     if (_webhookUrl.isEmpty || !_webhookUrl.startsWith("http")) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -202,7 +199,6 @@ class _MainScreenState extends State<MainScreen> {
       _serverStatus = "Checking...";
     });
 
-    // Generate Random Data
     const chars = "abcdefghijklmnopqrstuvwxyz1234567890";
     final random = Random();
     
@@ -214,7 +210,6 @@ class _MainScreenState extends State<MainScreen> {
     String payload = "accounts=${base64.encode(utf8.encode(convertedStr))}";
 
     try {
-      // Send request with timeout
       final response = await http.post(
         Uri.parse(_webhookUrl),
         headers: {'Content-Type': 'text/plain'},
@@ -224,26 +219,19 @@ class _MainScreenState extends State<MainScreen> {
       if (response.body.isNotEmpty) {
         try {
           dynamic decoded = jsonDecode(response.body);
-          
-          // Handle if it's wrapped in a list
-          if (decoded is List && decoded.isNotEmpty) {
-            decoded = decoded[0];
-          }
+          if (decoded is List && decoded.isNotEmpty) decoded = decoded[0];
 
           if (decoded is Map) {
             dynamic dataNode = decoded['data'] is Map ? decoded['data'] : decoded;
-            
             int successCount = dataNode['success_count'] ?? 0;
             int failedCount = dataNode['failed_count'] ?? 0;
 
-            // LOGIC IMPLEMENTED HERE
             setState(() {
               if (failedCount > 0 && successCount == 0) {
-                _serverStatus = "ON"; // Server processed bad data and failed it -> ON
+                _serverStatus = "ON"; 
               } else if (failedCount == 0 && successCount == 0) {
-                _serverStatus = "OFF"; // Server returned 0/0 -> OFF
+                _serverStatus = "OFF"; 
               } else {
-                // Fallback for other scenarios (like success > 0)
                 _serverStatus = "ON"; 
               }
             });
@@ -251,14 +239,13 @@ class _MainScreenState extends State<MainScreen> {
              setState(() => _serverStatus = "OFF");
           }
         } catch (e) {
-          setState(() => _serverStatus = "OFF"); // Invalid JSON
+          setState(() => _serverStatus = "OFF");
         }
       } else {
-        setState(() => _serverStatus = "OFF"); // Empty body
+        setState(() => _serverStatus = "OFF");
       }
 
     } catch (e) {
-      // Timeout or Connection Error
       setState(() => _serverStatus = "OFF");
     } finally {
       setState(() => _isChecking = false);
@@ -343,7 +330,6 @@ class _MainScreenState extends State<MainScreen> {
     _usernameController.clear();
     _cookiesController.clear();
     _generatePassword(); 
-    
   }
 
   void _addLog(String status, String message, {String style = "normal"}) {
@@ -358,11 +344,39 @@ class _MainScreenState extends State<MainScreen> {
     _saveData();
   }
 
-  Future<void> _exportToFile() async {
-    if (!Platform.isAndroid) {
-      _addLog("Error", "Public Downloads export only supported on Android");
-      return;
+  // --- NEW: AUTOMATIC SHARE FUNCTION ---
+  Future<void> _shareEncryptedFile() async {
+    try {
+      // 1. Prepare data
+      final String rawJson = json.encode(_accounts);
+      final String encryptedOutput = SecureVault.pack(rawJson, _currentPassword);
+
+      // 2. Create a temporary file
+      final Directory tempDir = await getTemporaryDirectory();
+      final File tempFile = File('${tempDir.path}/$_jsonFilename');
+      await tempFile.writeAsString(encryptedOutput);
+
+      // 3. Share the file with the password pre-filled in the caption
+      // This text will appear in the message box when user selects Telegram
+      // The bot reads this caption to get the password.
+      final String shareText = _currentPassword;
+
+      await Share.shareXFiles(
+        [XFile(tempFile.path)],
+        text: shareText,
+        subject: 'Encrypted Accounts Backup',
+      );
+      
+      _addLog("System", "Share sheet opened. Select Telegram to send.");
+
+    } catch (e) {
+      _addLog("Error", "Share failed: $e");
     }
+  }
+
+  // --- ENCRYPTED IMPORT ---
+  Future<void> _importFromFile() async {
+    if (!Platform.isAndroid) return;
 
     try {
       var permission = await Permission.manageExternalStorage.status;
@@ -371,58 +385,49 @@ class _MainScreenState extends State<MainScreen> {
       }
 
       Directory saveDir;
-      String displayPath;
-
       if (permission.isGranted) {
         saveDir = Directory('/storage/emulated/0/Download/insta_saver');
-        displayPath = '/storage/emulated/0/Download/insta_saver/$_jsonFilename';
       } else {
         final Directory? privateDir = await getDownloadsDirectory();
-        if (privateDir == null) {
-          _addLog("Error", "Could not access any storage directory");
-          return;
-        }
+        if (privateDir == null) return;
         saveDir = Directory('${privateDir.path}/insta_saver');
-        displayPath = 'App-private folder: ${saveDir.path}/$_jsonFilename';
+      }
 
-        _addLog("Warning", "Permission denied – saved to private folder");
+      final File file = File('${saveDir.path}/$_jsonFilename');
+      
+      if (!await file.exists()) {
+        _addLog("Error", "No backup file found at ${file.path}");
+        return;
+      }
+
+      // 1. Read Encrypted String
+      String encryptedContent = await file.readAsString();
+
+      // 2. Decrypt
+      String decryptedJson = SecureVault.unpack(encryptedContent, _currentPassword);
+
+      if (decryptedJson.startsWith("ERROR:")) {
+        _addLog("Error", "Decryption Failed: Wrong password or tampered file");
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("To save in public Downloads, go to App Settings → Permissions → All files access → Allow"),
-            backgroundColor: Colors.orange,
-            duration: Duration(seconds: 8),
-          ),
+          const SnackBar(content: Text("Import Failed: Wrong Password?"), backgroundColor: Colors.red),
         );
+        return;
       }
 
-      if (!await saveDir.exists()) {
-        await saveDir.create(recursive: true);
-      }
+      // 3. Load Data
+      final List<dynamic> decoded = json.decode(decryptedJson);
+      setState(() {
+        _accounts = decoded.map((e) => Map<String, String>.from(e)).toList();
+      });
 
-      final String filePath = '${saveDir.path}/$_jsonFilename';
-      final File file = File(filePath);
-
-      final encoder = JsonEncoder.withIndent('  ');
-      await file.writeAsString(encoder.convert(_accounts));
-
-      _addLog("Success", "Exported successfully!");
-      _addLog("Info", "Path: $displayPath");
-
+      await _saveData();
+      _addLog("Success", "Imported ${_accounts.length} accounts from secure backup");
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Exported! Check Logs for path"),
-          backgroundColor: Colors.green,
-        ),
+        SnackBar(content: Text("Imported ${_accounts.length} accounts"), backgroundColor: Colors.green),
       );
+
     } catch (e) {
-      _addLog("Error", "Export failed: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Export failed – opening App Settings"),
-          backgroundColor: Colors.red,
-        ),
-      );
-      await openAppSettings();
+      _addLog("Error", "Import failed: $e");
     }
   }
 
@@ -434,7 +439,6 @@ class _MainScreenState extends State<MainScreen> {
         backgroundColor: const Color(0xff111827),
         elevation: 0,
         actions: [
-          // --- NEW: Server Status Indicator ---
           Center(
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -686,9 +690,15 @@ class _MainScreenState extends State<MainScreen> {
               Row(
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.download, color: Color(0xff22c55e)),
-                    onPressed: _exportToFile,
-                    tooltip: "Export to public Downloads",
+                    icon: const Icon(Icons.file_upload, color: Color(0xff3b82f6)),
+                    onPressed: _importFromFile,
+                    tooltip: "Import Secure File",
+                  ),
+                  // --- CHANGED: Download replaced with Share ---
+                  IconButton(
+                    icon: const Icon(Icons.send, color: Color(0xff22c55e)),
+                    onPressed: _shareEncryptedFile,
+                    tooltip: "Share to Telegram",
                   ),
                   IconButton(
                     icon: const Icon(Icons.delete_sweep, color: Colors.red),
