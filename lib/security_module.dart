@@ -5,13 +5,14 @@ import 'package:crypto/crypto.dart';
 
 class SecureVault {
   // A unique salt makes the key unique even if two people use the same password
-  static const String _internalSalt = "SKYSYS_PRO_SALT_99821"; 
+  static const String _internalSalt = "SKYSYS_PRO_SALT_99821_Bokachondro985"; 
 
   /// Derives a 256-bit key using PBKDF2
   static encrypt.Key _deriveKey(String password) {
+    // FIX: Correct usage of Pbkdf2 and Hmac for crypto package
     final pbkdf2 = Pbkdf2(
-      macAlgorithm: Hmac.sha256,
-      iterations: 2000, // Makes brute force 2000x slower
+      macAlgorithm: Hmac(sha256), // Use Hmac constructor with sha256 hash
+      iterations: 2000, 
       bits: 256,
     );
     
