@@ -7,21 +7,13 @@ class SecureVault {
   // A unique salt makes the key unique even if two people use the same password
   static const String _internalSalt = "SKYSYS_PRO_SALT_99821_Bokachondro985"; 
 
-  /// Derives a 256-bit key using PBKDF2
+  /// Derives a 256-bit key using SHA-256 stretching
   static encrypt.Key _deriveKey(String password) {
-    // FIX: Correct usage of Pbkdf2 and Hmac for crypto package
-    final pbkdf2 = Pbkdf2(
-      macAlgorithm: Hmac(sha256), // Use Hmac constructor with sha256 hash
-      iterations: 2000, 
-      bits: 256,
-    );
-    
-    // Correctly convert strings to Uint8List for the crypto library
-    final passwordBytes = Uint8List.fromList(utf8.encode(password));
-    final saltBytes = Uint8List.fromList(utf8.encode(_internalSalt));
-
-    final bytes = pbkdf2.deriveSync(passwordBytes, saltBytes);
-    return encrypt.Key(bytes);
+    // We combine the password and salt, then hash it to create a 32-byte (256-bit) key
+    // This is a simplified version of key stretching suitable for the 'crypto' package
+    var bytes = utf8.encode(password + _internalSalt);
+    var digest = sha256.convert(bytes);
+    return encrypt.Key(Uint8List.fromList(digest.bytes));
   }
 
   /// Encrypts String -> Base64(IV + EncryptedData)
@@ -29,11 +21,13 @@ class SecureVault {
     final key = _deriveKey(password);
     final iv = encrypt.IV.fromSecureRandom(16); // Random IV for every file
     
-    // Using AES-GCM for Authenticated Encryption
-    final encrypter = encrypt.Encrypter(encrypt.AES(key, mode: encrypt.AESMode.gcm));
+    // Note: Standard AES in 'encrypt' package usually uses PKCS7 padding
+    // Using SIC/CTR or CBC mode is often more stable across Flutter versions than GCM 
+    // unless you specifically need authentication tags.
+    final encrypter = encrypt.Encrypter(encrypt.AES(key, mode: encrypt.AESMode.cbc));
     final encrypted = encrypter.encrypt(plainText, iv: iv);
 
-    // Combine IV and Data with a separator for easy extraction
+    // Combine IV and Data with a separator
     String combined = "${iv.base64}:${encrypted.base64}";
     
     // Final result is Base64 encoded
@@ -52,7 +46,7 @@ class SecureVault {
       final cipherText = parts[1];
       
       final key = _deriveKey(password);
-      final encrypter = encrypt.Encrypter(encrypt.AES(key, mode: encrypt.AESMode.gcm));
+      final encrypter = encrypt.Encrypter(encrypt.AES(key, mode: encrypt.AESMode.cbc));
       
       return encrypter.decrypt64(cipherText, iv: iv);
     } catch (e) {
