@@ -9,7 +9,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:share_plus/share_plus.dart'; // NEW IMPORT
 import 'security_module.dart'; // Import the security module
 
 void main() {
@@ -257,6 +256,8 @@ class _MainScreenState extends State<MainScreen> {
     final password = _passwordController.text.trim(); 
     final cookies = _cookiesController.text.trim();
     
+    // Sync _currentPassword with what's shown in the field
+    _currentPassword = password;
     _webhookUrl = _webhookController.text.trim();
     _jsonFilename = _filenameController.text.trim();
 
@@ -344,33 +345,59 @@ class _MainScreenState extends State<MainScreen> {
     _saveData();
   }
 
-  // --- NEW: AUTOMATIC SHARE FUNCTION ---
-  Future<void> _shareEncryptedFile() async {
+  // --- DOWNLOAD ENCRYPTED FILE (password on first line, then encrypted JSON) ---
+  Future<void> _downloadEncryptedFile() async {
     try {
-      // 1. Prepare data
+      // Use the password currently shown in the field (fixes mismatch)
+      final String activePassword = _passwordController.text.trim().isNotEmpty
+          ? _passwordController.text.trim()
+          : _currentPassword;
+
+      // 1. Prepare data: first line = password, then encrypted JSON
       final String rawJson = json.encode(_accounts);
-      final String encryptedOutput = SecureVault.pack(rawJson, _currentPassword);
+      final String encryptedOutput = SecureVault.pack(rawJson, activePassword);
+      final String fileContent = '$activePassword\n$encryptedOutput';
 
-      // 2. Create a temporary file
-      final Directory tempDir = await getTemporaryDirectory();
-      final File tempFile = File('${tempDir.path}/$_jsonFilename');
-      await tempFile.writeAsString(encryptedOutput);
+      // 2. Save to Downloads folder
+      if (!Platform.isAndroid) {
+        _addLog("Error", "Download only supported on Android");
+        return;
+      }
 
-      // 3. Share the file with the password pre-filled in the caption
-      // This text will appear in the message box when user selects Telegram
-      // The bot reads this caption to get the password.
-      final String shareText = _currentPassword;
+      var permission = await Permission.manageExternalStorage.status;
+      if (!permission.isGranted) {
+        permission = await Permission.manageExternalStorage.request();
+      }
 
-      await Share.shareXFiles(
-        [XFile(tempFile.path)],
-        text: shareText,
-        subject: 'Encrypted Accounts Backup',
+      Directory saveDir;
+      if (permission.isGranted) {
+        saveDir = Directory('/storage/emulated/0/Download/insta_saver');
+      } else {
+        final Directory? privateDir = await getDownloadsDirectory();
+        if (privateDir == null) {
+          _addLog("Error", "Cannot access Downloads directory");
+          return;
+        }
+        saveDir = Directory('${privateDir.path}/insta_saver');
+      }
+
+      if (!await saveDir.exists()) {
+        await saveDir.create(recursive: true);
+      }
+
+      final File saveFile = File('${saveDir.path}/$_jsonFilename');
+      await saveFile.writeAsString(fileContent);
+
+      _addLog("System", "File saved to ${saveFile.path}");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Downloaded to ${saveFile.path}"),
+          backgroundColor: Colors.green,
+        ),
       );
-      
-      _addLog("System", "Share sheet opened. Select Telegram to send.");
 
     } catch (e) {
-      _addLog("Error", "Share failed: $e");
+      _addLog("Error", "Download failed: $e");
     }
   }
 
@@ -400,11 +427,24 @@ class _MainScreenState extends State<MainScreen> {
         return;
       }
 
-      // 1. Read Encrypted String
-      String encryptedContent = await file.readAsString();
+      // 1. Read file content - first line is password, rest is encrypted data
+      String fileContent = await file.readAsString();
+      final int newlineIdx = fileContent.indexOf('\n');
+      String encryptedContent;
+      String filePassword;
+      if (newlineIdx != -1) {
+        filePassword = fileContent.substring(0, newlineIdx).trim();
+        encryptedContent = fileContent.substring(newlineIdx + 1).trim();
+      } else {
+        // Legacy format (no password line) - use current password
+        filePassword = _passwordController.text.trim().isNotEmpty
+            ? _passwordController.text.trim()
+            : _currentPassword;
+        encryptedContent = fileContent;
+      }
 
       // 2. Decrypt
-      String decryptedJson = SecureVault.unpack(encryptedContent, _currentPassword);
+      String decryptedJson = SecureVault.unpack(encryptedContent, filePassword);
 
       if (decryptedJson.startsWith("ERROR:")) {
         _addLog("Error", "Decryption Failed: Wrong password or tampered file");
@@ -694,11 +734,11 @@ class _MainScreenState extends State<MainScreen> {
                     onPressed: _importFromFile,
                     tooltip: "Import Secure File",
                   ),
-                  // --- CHANGED: Download replaced with Share ---
+                  // --- Download Button ---
                   IconButton(
-                    icon: const Icon(Icons.send, color: Color(0xff22c55e)),
-                    onPressed: _shareEncryptedFile,
-                    tooltip: "Share to Telegram",
+                    icon: const Icon(Icons.download, color: Color(0xff22c55e)),
+                    onPressed: _downloadEncryptedFile,
+                    tooltip: "Download Backup",
                   ),
                   IconButton(
                     icon: const Icon(Icons.delete_sweep, color: Colors.red),
@@ -874,3 +914,4 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 }
+
