@@ -729,11 +729,6 @@ class _MainScreenState extends State<MainScreen> {
               Text("Saved Accounts: ${_accounts.length}", style: const TextStyle(color: Colors.white)),
               Row(
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.file_upload, color: Color(0xff3b82f6)),
-                    onPressed: _importFromFile,
-                    tooltip: "Import Secure File",
-                  ),
                   // --- Download Button ---
                   IconButton(
                     icon: const Icon(Icons.download, color: Color(0xff22c55e)),
