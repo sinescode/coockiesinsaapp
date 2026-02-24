@@ -9,7 +9,6 @@ plugins {
 }
 
 // 1. Load keystore properties from key.properties file
-// The GitHub workflow creates this file at android/key.properties
 val keystorePropertiesFile = rootProject.file("key.properties")
 val keystoreProperties = Properties()
 if (keystorePropertiesFile.exists()) {
@@ -24,6 +23,9 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        
+        // FIX: Enable Core Library Desugaring
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -56,8 +58,7 @@ android {
 
     buildTypes {
         release {
-            // 3. Use the release signing config if properties exist, otherwise use debug
-            // This allows the CI to sign the release, but local builds still work if you don't have the key
+            // 3. Use the release signing config if properties exist
             signingConfig = if (keystorePropertiesFile.exists()) {
                 signingConfigs.getByName("release")
             } else {
@@ -72,9 +73,12 @@ flutter {
 }
 
 dependencies {
-    // Firebase BOM (Bill of Materials) - manages versions automatically
+    // Firebase BOM (Bill of Materials)
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
     
     // Firebase Cloud Messaging
     implementation("com.google.firebase:firebase-messaging")
+
+    // FIX: Add the desugaring library required by flutter_local_notifications
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 }
