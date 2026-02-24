@@ -1,5 +1,4 @@
-name: Build Signed Release APKs (ARM64 + ARMv7)
-
+name: Build Signed Release APKs
 on:
   push:
     branches: [ main ]
