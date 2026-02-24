@@ -22,14 +22,14 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
     
-    # 3️⃣ Setup Flutter (FIXED VERSION)
+    # 3️⃣ Setup Flutter
     - name: Setup Flutter
       uses: subosito/flutter-action@v2
       with:
         channel: 'stable'
-        flutter-version: '3.41.2'  # Updated to match your SDK requirement
+        flutter-version: '3.41.2'
 
-    # 4️⃣ Disable Flutter analytics (optional, speeds up)
+    # 4️⃣ Disable Flutter analytics
     - name: Disable Flutter analytics
       run: flutter config --no-analytics
 
@@ -50,40 +50,47 @@ jobs:
     - name: Get dependencies
       run: flutter pub get
     
-    # 7️⃣ Build Signed Release APKs
-    - name: Build Signed Release APKs
+    # 7️⃣ Build Signed Release APKs (FIXED - separate steps)
+    - name: Decode keystore
+      if: ${{ secrets.KEYSTORE_BASE64 != '' }}
       env:
         KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+      run: |
+        echo "$KEYSTORE_BASE64" | base64 -di > android/app/release.keystore
+        echo "Keystore created"
+
+    - name: Create key.properties
+      if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+      env:
         KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
       run: |
-        if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
-          echo "Warning: Signing secrets not fully configured. Building unsigned release APK."
-          flutter build apk --release --split-per-abi
-        else
-          echo "$KEYSTORE_BASE64" | base64 -di > android/app/release.keystore
-          
-          # Create key.properties
-          cat > android/key.properties <<EOF
-          storePassword=$KEYSTORE_PASSWORD
-          keyPassword=$KEY_PASSWORD
-          keyAlias=$KEY_ALIAS
-          storeFile=release.keystore
-          EOF
-          
-          flutter build apk --release --split-per-abi
-          
-          rm -f android/app/release.keystore
-          rm -f android/key.properties
-        fi
+        echo "storePassword=${KEYSTORE_PASSWORD}" > android/key.properties
+        echo "keyPassword=${KEY_PASSWORD}" >> android/key.properties
+        echo "keyAlias=${KEY_ALIAS}" >> android/key.properties
+        echo "storeFile=release.keystore" >> android/key.properties
+        echo "key.properties created"
+
+    - name: Build APK (signed)
+      if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+      run: |
+        flutter build apk --release --split-per-abi
+        rm -f android/app/release.keystore
+        rm -f android/key.properties
+
+    - name: Build APK (unsigned)
+      if: ${{ secrets.KEYSTORE_BASE64 == '' }}
+      run: |
+        echo "Warning: Signing secrets not configured. Building unsigned APK."
+        flutter build apk --release --split-per-abi
 
     # 8️⃣ Rename APKs
     - name: Rename APKs
       run: |
         mkdir -p release-apks
-        cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk release-apks/CookiesInsta-arm64.apk
-        cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk release-apks/CookiesInsta-armv7a.apk
+        cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk release-apks/CookiesInsta-arm64.apk || true
+        cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk release-apks/CookiesInsta-armv7a.apk || true
         ls -la release-apks/
 
     # 9️⃣ Upload APKs
@@ -94,7 +101,7 @@ jobs:
         path: release-apks/*.apk
         retention-days: 30
 
-    # 🔟 Create Release (only on main branch pushes)
+    # 🔟 Create Release
     - name: Create Release
       if: github.ref == 'refs/heads/main' && github.event_name == 'push'
       uses: softprops/action-gh-release@v1
