@@ -1,8 +1,8 @@
 plugins {
     id("com.android.application")
     id("kotlin-android")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+    id("com.google.gms.google-services") 
 }
 
 android {
@@ -20,11 +20,10 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.turjaun.coockiesinsa"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
+        // Fix: FCM requires minSdk 19 or higher, Flutter usually sets 21
+        minSdk = 21
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -32,8 +31,6 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
         }
     }
@@ -41,4 +38,15 @@ android {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // Firebase BOM (Bill of Materials) - manages versions automatically
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    
+    // Firebase Cloud Messaging
+    implementation("com.google.firebase:firebase-messaging")
+    
+    // Optional: Firebase Analytics (recommended)
+    implementation("com.google.firebase:firebase-analytics")
 }

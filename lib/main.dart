@@ -9,11 +9,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'security_module.dart'; // Import the security module
+import 'security_module.dart';
+import 'fcm_service.dart'; // Import FCM service
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize FCM
+  await FCMService().initialize();
+  
   runApp(const MyApp());
 }
+
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -93,17 +100,54 @@ class _MainScreenState extends State<MainScreen> {
   String _serverStatus = "Check"; 
   bool _isChecking = false;
 
+  // FCM Variables
+  String? _deviceToken;
+  final FCMService _fcmService = FCMService();
+
   // Input Controllers
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _cookiesController = TextEditingController();
   final TextEditingController _webhookController = TextEditingController();
   final TextEditingController _filenameController = TextEditingController();
+  final TextEditingController _deviceTokenController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _loadData();
+    _loadFCMToken();
+  }
+
+  // Load FCM token
+  Future<void> _loadFCMToken() async {
+    // First check for saved token
+    String? savedToken = await _fcmService.getSavedToken();
+    
+    setState(() {
+      _deviceToken = savedToken;
+      _deviceTokenController.text = savedToken ?? 'Not available';
+    });
+
+    // Listen for token updates
+    _fcmService.tokenStream.listen((token) {
+      if (mounted) {
+        setState(() {
+          _deviceToken = token;
+          _deviceTokenController.text = token ?? 'Not available';
+        });
+      }
+    });
+  }
+
+  void _copyDeviceToken() {
+    if (_deviceToken != null && _deviceToken!.isNotEmpty) {
+      Clipboard.setData(ClipboardData(text: _deviceToken!));
+      _addLog("System", "Device token copied successfully");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Device token copied to clipboard"), backgroundColor: Colors.green),
+      );
+    }
   }
 
   // --- Data Persistence Logic ---
@@ -866,10 +910,12 @@ class _MainScreenState extends State<MainScreen> {
   // --- TAB 3: SETTINGS ---
 
   Widget _buildSettingsTab() {
-    return Padding(
+    return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Webhook URL
           TextField(
             controller: _webhookController,
             style: const TextStyle(color: Colors.white),
@@ -879,6 +925,8 @@ class _MainScreenState extends State<MainScreen> {
             ),
           ),
           const SizedBox(height: 20),
+          
+          // JSON Filename
           TextField(
             controller: _filenameController,
             style: const TextStyle(color: Colors.white),
@@ -888,6 +936,58 @@ class _MainScreenState extends State<MainScreen> {
             ),
           ),
           const SizedBox(height: 30),
+          
+          // Device Token Section
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xff0b1220),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xff1f2937)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "FCM Device Token",
+                  style: TextStyle(
+                    color: Color(0xff94a3b8), 
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _deviceTokenController,
+                  style: const TextStyle(
+                    color: Colors.white, 
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                  ),
+                  maxLines: 3,
+                  readOnly: true,
+                  decoration: InputDecoration(
+                    filled: true,
+                    fillColor: const Color(0xff111827),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(6),
+                      borderSide: const BorderSide(color: Color(0xff1f2937)),
+                    ),
+                    contentPadding: const EdgeInsets.all(10),
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.copy, color: Color(0xff22c55e), size: 20),
+                      onPressed: _copyDeviceToken,
+                      tooltip: "Copy Token",
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          const SizedBox(height: 30),
+          
+          // Save Settings Button
           SizedBox(
             width: double.infinity,
             child: OutlinedButton(
@@ -903,10 +1003,9 @@ class _MainScreenState extends State<MainScreen> {
               },
               child: const Text("Save Settings"),
             ),
-          )
+          ),
         ],
       ),
     );
   }
 }
-

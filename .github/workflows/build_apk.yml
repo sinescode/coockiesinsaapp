@@ -1,10 +1,11 @@
-name: Build APKs (ARM64 + ARMv7)
+name: Build Signed Release APKs (ARM64 + ARMv7)
 
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -12,39 +13,93 @@ jobs:
 
     steps:
     # 1️⃣ Checkout code
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     # 2️⃣ Setup Java
-    - uses: actions/setup-java@v3
+    - name: Setup Java
+      uses: actions/setup-java@v4
       with:
         distribution: 'temurin'
         java-version: '17'
     
     # 3️⃣ Setup Flutter
-    - uses: subosito/flutter-action@v2
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
       with:
         channel: 'stable'
+        flutter-version: '3.16.0'
     
-    # 4️⃣ Get dependencies
+    # 4️⃣ Decode google-services.json
+    - name: Decode google-services.json
+      env:
+        GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+      run: |
+        if [ -z "$GOOGLE_SERVICES_JSON" ]; then
+          echo "Error: GOOGLE_SERVICES_JSON secret is not set!"
+          exit 1
+        fi
+        # Create in the main source set where plugin expects it
+        echo "$GOOGLE_SERVICES_JSON" | base64 -di > android/app/google-services.json
+        echo "google-services.json created successfully"
+        ls -la android/app/google-services.json
+
+    # 5️⃣ Get dependencies
     - name: Get dependencies
       run: flutter pub get
     
-    # 5️⃣ Build APKs for all ABIs (small separate APKs)
-    - name: Build APKs for all ABIs
-      run: flutter build apk --release --split-per-abi
+    # 6️⃣ Build Signed Release APKs
+    - name: Build Signed Release APKs
+      env:
+        KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      run: |
+        if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+          echo "Warning: Signing secrets not fully configured. Building unsigned release APK."
+          flutter build apk --release --split-per-abi
+        else
+          echo "$KEYSTORE_BASE64" | base64 -di > android/app/release.keystore
+          
+          # Create key.properties
+          cat > android/key.properties <<EOF
+          storePassword=$KEYSTORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=$KEY_ALIAS
+          storeFile=release.keystore
+          EOF
+          
+          flutter build apk --release --split-per-abi
+          
+          rm -f android/app/release.keystore
+          rm -f android/key.properties
+        fi
 
-    # 6️⃣ Rename APKs
+    # 7️⃣ Rename APKs
     - name: Rename APKs
       run: |
-        mv build/app/outputs/flutter-apk/app-arm64-v8a-release.apk build/app/outputs/flutter-apk/CookiesInsta-arm64.apk
-        mv build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk build/app/outputs/flutter-apk/CookiesInsta-armv7a.apk
+        mkdir -p release-apks
+        cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk release-apks/CookiesInsta-arm64.apk
+        cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk release-apks/CookiesInsta-armv7a.apk
+        ls -la release-apks/
 
-    # 7️⃣ Upload APKs
+    # 8️⃣ Upload APKs
     - name: Upload APKs
       uses: actions/upload-artifact@v4
       with:
         name: release-apks
-        path: |
-          build/app/outputs/flutter-apk/CookiesInsta-arm64.apk
-          build/app/outputs/flutter-apk/CookiesInsta-armv7a.apk 
+        path: release-apks/*.apk
+        retention-days: 30
 
+    # 9️⃣ Create Release (only on main branch pushes)
+    - name: Create Release
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      uses: softprops/action-gh-release@v1
+      with:
+        files: release-apks/*.apk
+        tag_name: v${{ github.run_number }}
+        name: Release v${{ github.run_number }}
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
