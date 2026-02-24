@@ -22,14 +22,18 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
     
-    # 3️⃣ Setup Flutter
+    # 3️⃣ Setup Flutter (FIXED VERSION)
     - name: Setup Flutter
       uses: subosito/flutter-action@v2
       with:
         channel: 'stable'
-        flutter-version: '3.16.0'
-    
-    # 4️⃣ Decode google-services.json
+        flutter-version: '3.24.0'  # Updated to match your SDK requirement
+
+    # 4️⃣ Disable Flutter analytics (optional, speeds up)
+    - name: Disable Flutter analytics
+      run: flutter config --no-analytics
+
+    # 5️⃣ Decode google-services.json
     - name: Decode google-services.json
       env:
         GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
@@ -38,16 +42,15 @@ jobs:
           echo "Error: GOOGLE_SERVICES_JSON secret is not set!"
           exit 1
         fi
-        # Create in the main source set where plugin expects it
         echo "$GOOGLE_SERVICES_JSON" | base64 -di > android/app/google-services.json
         echo "google-services.json created successfully"
         ls -la android/app/google-services.json
 
-    # 5️⃣ Get dependencies
+    # 6️⃣ Get dependencies
     - name: Get dependencies
       run: flutter pub get
     
-    # 6️⃣ Build Signed Release APKs
+    # 7️⃣ Build Signed Release APKs
     - name: Build Signed Release APKs
       env:
         KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -75,7 +78,7 @@ jobs:
           rm -f android/key.properties
         fi
 
-    # 7️⃣ Rename APKs
+    # 8️⃣ Rename APKs
     - name: Rename APKs
       run: |
         mkdir -p release-apks
@@ -83,7 +86,7 @@ jobs:
         cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk release-apks/CookiesInsta-armv7a.apk
         ls -la release-apks/
 
-    # 8️⃣ Upload APKs
+    # 9️⃣ Upload APKs
     - name: Upload APKs
       uses: actions/upload-artifact@v4
       with:
@@ -91,7 +94,7 @@ jobs:
         path: release-apks/*.apk
         retention-days: 30
 
-    # 9️⃣ Create Release (only on main branch pushes)
+    # 🔟 Create Release (only on main branch pushes)
     - name: Create Release
       if: github.ref == 'refs/heads/main' && github.event_name == 'push'
       uses: softprops/action-gh-release@v1
