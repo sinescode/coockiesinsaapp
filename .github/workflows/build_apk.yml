@@ -59,17 +59,16 @@ jobs:
           flutter build apk --release --split-per-abi
         else
           echo "Setting up signing configuration..."
+          # Decode keystore to android/app directory
           echo "$KEYSTORE_BASE64" | base64 -di > android/app/release.keystore
           
-          # Create key.properties file
-          cat > android/key.properties << EOF
-          storePassword=$KEYSTORE_PASSWORD
-          keyPassword=$KEY_PASSWORD
-          keyAlias=$KEY_ALIAS
-          storeFile=release.keystore
-          EOF
+          # Create key.properties file using echo (avoids EOF indentation issues)
+          echo "storePassword=$KEYSTORE_PASSWORD" > android/key.properties
+          echo "keyPassword=$KEY_PASSWORD" >> android/key.properties
+          echo "keyAlias=$KEY_ALIAS" >> android/key.properties
+          echo "storeFile=release.keystore" >> android/key.properties
           
-          # Build signed APK using split-per-abi
+          # Build signed APK
           flutter build apk --release --split-per-abi
           
           # Cleanup sensitive files

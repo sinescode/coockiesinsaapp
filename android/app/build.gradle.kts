@@ -1,8 +1,19 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     id("dev.flutter.flutter-gradle-plugin")
     id("com.google.gms.google-services") 
+}
+
+// 1. Load keystore properties from key.properties file
+// The GitHub workflow creates this file at android/key.properties
+val keystorePropertiesFile = rootProject.file("key.properties")
+val keystoreProperties = Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
 android {
@@ -21,17 +32,37 @@ android {
 
     defaultConfig {
         applicationId = "com.turjaun.coockiesinsa"
-        minSdk = flutter.minSdkVersion
-        // Fix: FCM requires minSdk 19 or higher, Flutter usually sets 21
+        // Fixed minSdk to 21 for FCM compatibility
         minSdk = 21
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
+    // 2. Configure Signing Configs
+    signingConfigs {
+        create("release") {
+            // Only set these if the properties exist
+            keyAlias = keystoreProperties.getProperty("keyAlias")
+            keyPassword = keystoreProperties.getProperty("keyPassword")
+            storePassword = keystoreProperties.getProperty("storePassword")
+            
+            val storeFilePath = keystoreProperties.getProperty("storeFile")
+            if (storeFilePath != null) {
+                storeFile = file(storeFilePath)
+            }
+        }
+    }
+
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("debug")
+            // 3. Use the release signing config if properties exist, otherwise use debug
+            // This allows the CI to sign the release, but local builds still work if you don't have the key
+            signingConfig = if (keystorePropertiesFile.exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }
@@ -46,7 +77,4 @@ dependencies {
     
     // Firebase Cloud Messaging
     implementation("com.google.firebase:firebase-messaging")
-    
-    // Optional: Firebase Analytics (recommended)
-    implementation("com.google.firebase:firebase-analytics")
 }
