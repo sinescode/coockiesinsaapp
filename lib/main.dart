@@ -155,7 +155,8 @@ class _MainScreenState extends State<MainScreen> {
   final TextEditingController _filenameController = TextEditingController();
 
   // Keep old single controller as alias for compatibility
-  TextEditingController get _webhookController => _activeWebhook == 1 ? _webhook1Controller : _webhook2Controller;
+  TextEditingController get _webhookController =>
+      _activeWebhook == 1 ? _webhook1Controller : _webhook2Controller;
 
   @override
   void initState() {
@@ -322,26 +323,78 @@ class _MainScreenState extends State<MainScreen> {
     _addLog("System", "Password copied successfully");
   }
 
-  // --- NEW: Poll job status until done ---
+  // ─────────────────────────────────────────────────────────────────
+  // FIX 1 & 2: Retry helper — retries up to 3 times on failure/5xx
+  // ─────────────────────────────────────────────────────────────────
+  Future<http.Response?> _postWithRetry(String url, String body,
+      {int retries = 3}) async {
+    for (int i = 0; i < retries; i++) {
+      try {
+        final response = await http
+            .post(
+              Uri.parse(url),
+              headers: {'Content-Type': 'text/plain'},
+              body: body,
+            )
+            .timeout(const Duration(seconds: 12));
+
+        // Retry on 5xx server errors
+        if (response.statusCode >= 500) {
+          if (i < retries - 1) {
+            await Future.delayed(Duration(seconds: 2 * (i + 1)));
+            continue;
+          }
+        }
+        return response;
+      } on TimeoutException {
+        if (i < retries - 1) {
+          await Future.delayed(Duration(seconds: 2 * (i + 1)));
+          continue;
+        }
+        return null;
+      } catch (e) {
+        if (i < retries - 1) {
+          await Future.delayed(Duration(seconds: 2 * (i + 1)));
+          continue;
+        }
+        return null;
+      }
+    }
+    return null;
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // FIX 3: Poll job status — handles TimeoutException gracefully
+  // ─────────────────────────────────────────────────────────────────
   Future<void> _pollJobStatus(String jobId) async {
     final statusUrl =
         Uri.parse("https://submitwork.org/api/status/$jobId");
 
     for (int i = 0; i < 20; i++) {
-      // max ~40 seconds
-      await Future.delayed(const Duration(seconds: 2));
+      // max ~60 seconds total
+      await Future.delayed(const Duration(seconds: 3));
 
       try {
         final res = await http
             .get(statusUrl)
-            .timeout(const Duration(seconds: 8));
+            .timeout(const Duration(seconds: 12));
+
+        // Server blip — keep polling
+        if (res.statusCode >= 500) continue;
 
         if (res.statusCode != 200) {
-          _addLog("Error", "Status check HTTP ${res.statusCode}");
+          _addLog("Error", "Status check failed: HTTP ${res.statusCode}");
           return;
         }
 
-        final data = jsonDecode(res.body);
+        dynamic data;
+        try {
+          data = jsonDecode(res.body);
+        } catch (_) {
+          // Bad JSON on this attempt — retry
+          continue;
+        }
+
         final String status = data['status'] ?? '';
 
         if (status == 'done') {
@@ -349,15 +402,21 @@ class _MainScreenState extends State<MainScreen> {
           final int failed = (data['data']?['failed_count'] ?? 0) as int;
           final List errors = data['errors'] ?? [];
 
-          String logStyle = success > 0 ? "bold" : "normal";
-          String logStatus = success > 0 ? "Webhook" : "Error";
           String logMsg = "✓ Success: $success | ✗ Failed: $failed";
           if (errors.isNotEmpty) logMsg += " | ${errors.first}";
 
-          _addLog(logStatus, logMsg, style: logStyle);
+          _addLog(
+            success > 0 ? "Webhook" : "Error",
+            logMsg,
+            style: success > 0 ? "bold" : "normal",
+          );
           return;
         }
-        // still processing — keep polling
+        // status == 'processing' or other — keep polling
+
+      } on TimeoutException {
+        // Don't abort — just retry next iteration
+        continue;
       } catch (e) {
         _addLog("Error", "Poll error: $e");
         return;
@@ -367,7 +426,9 @@ class _MainScreenState extends State<MainScreen> {
     _addLog("Error", "Timeout: job $jobId did not complete in time");
   }
 
-  // --- Check server status: routes to old or new system based on active webhook ---
+  // ─────────────────────────────────────────────────────────────────
+  // FIX 1: Accept any 2xx status code (202, 200, 201 all valid)
+  // ─────────────────────────────────────────────────────────────────
   Future<void> _checkServerStatus() async {
     final url = _webhookUrl;
     if (url.isEmpty || !url.startsWith("http")) {
@@ -400,15 +461,18 @@ class _MainScreenState extends State<MainScreen> {
         "accounts=${base64.encode(utf8.encode(convertedStr))}";
 
     try {
-      final response = await http
-          .post(
-            Uri.parse(url),
-            headers: {'Content-Type': 'text/plain'},
-            body: payload,
-          )
-          .timeout(const Duration(seconds: 10));
+      // FIX 2: Use retry helper instead of direct http.post
+      final response = await _postWithRetry(url, payload);
 
-      if (response.statusCode != 200 || response.body.isEmpty) {
+      if (response == null) {
+        setState(() => _serverStatus = "OFF");
+        return;
+      }
+
+      // FIX 1: Accept any 2xx (200, 201, 202) — was only accepting 200 before
+      if (response.statusCode < 200 ||
+          response.statusCode >= 300 ||
+          response.body.isEmpty) {
         setState(() => _serverStatus = "OFF");
         return;
       }
@@ -485,41 +549,49 @@ class _MainScreenState extends State<MainScreen> {
 
     if (_activeWebhook == 2) {
       // --- New system: job_id polling ---
-      try {
-        final pushResponse = await http
-            .post(
-              Uri.parse(_webhook2Url),
-              headers: {'Content-Type': 'text/plain'},
-              body: payload,
-            )
-            .timeout(const Duration(seconds: 10));
+      // FIX 2: Use retry helper
+      final pushResponse = await _postWithRetry(_webhook2Url, payload);
 
-        if (pushResponse.body.isEmpty) {
-          _addLog("Error", "(${pushResponse.statusCode}) Empty response");
-          return;
-        }
-
-        dynamic pushJson;
-        try {
-          pushJson = jsonDecode(pushResponse.body);
-        } catch (_) {
-          _addLog("Error",
-              "(${pushResponse.statusCode}) Invalid JSON: ${pushResponse.body}");
-          return;
-        }
-
-        final String? jobId = pushJson['job_id'];
-        if (jobId == null) {
-          final msg = pushJson['message'] ?? pushResponse.body;
-          _addLog("Error", "(${pushResponse.statusCode}) $msg");
-          return;
-        }
-
-        _addLog("Webhook", "Job submitted [$jobId] — waiting for result...");
-        await _pollJobStatus(jobId);
-      } catch (e) {
-        _addLog("Error", "Connection error: $e");
+      if (pushResponse == null) {
+        _addLog("Error", "Server unreachable after 3 attempts");
+        _usernameController.clear();
+        _cookiesController.clear();
+        _generatePassword();
+        return;
       }
+
+      if (pushResponse.body.isEmpty) {
+        _addLog("Error", "(${pushResponse.statusCode}) Empty response");
+        _usernameController.clear();
+        _cookiesController.clear();
+        _generatePassword();
+        return;
+      }
+
+      dynamic pushJson;
+      try {
+        pushJson = jsonDecode(pushResponse.body);
+      } catch (_) {
+        _addLog("Error",
+            "(${pushResponse.statusCode}) Invalid JSON: ${pushResponse.body}");
+        _usernameController.clear();
+        _cookiesController.clear();
+        _generatePassword();
+        return;
+      }
+
+      final String? jobId = pushJson['job_id'];
+      if (jobId == null) {
+        final msg = pushJson['message'] ?? pushResponse.body;
+        _addLog("Error", "(${pushResponse.statusCode}) $msg");
+        _usernameController.clear();
+        _cookiesController.clear();
+        _generatePassword();
+        return;
+      }
+
+      _addLog("Webhook", "Job submitted [$jobId] — waiting for result...");
+      await _pollJobStatus(jobId);
     } else {
       // --- Old system: direct success_count/failed_count response ---
       try {
