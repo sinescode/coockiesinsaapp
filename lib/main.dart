@@ -128,8 +128,14 @@ class _MainScreenState extends State<MainScreen> {
   List<Map<String, dynamic>> _logs = [];
 
   // Settings Variables
-  // NEW: Updated to submitwork.org push endpoint
-  String _webhookUrl = "https://submitwork.org/api/push";
+  // Webhook 1 = Old system (direct, parses success_count/failed_count)
+  // Webhook 2 = New system (submitwork.org job_id API)
+  String _webhook1Url = "http://43.135.182.151/api/api/v1/webhook/nRlmI2-8T7x2DAWe1hWxi97qGA1FcCxrNcyCtLTO_Cw/account-push";
+  String _webhook2Url = "https://submitwork.org/api/push";
+  int _activeWebhook = 1; // 1 = old direct system, 2 = new job_id system
+
+  String get _webhookUrl => _activeWebhook == 1 ? _webhook1Url : _webhook2Url;
+
   String _jsonFilename = "accounts.json";
   String _currentPassword = "";
 
@@ -144,8 +150,12 @@ class _MainScreenState extends State<MainScreen> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _cookiesController = TextEditingController();
-  final TextEditingController _webhookController = TextEditingController();
+  final TextEditingController _webhook1Controller = TextEditingController();
+  final TextEditingController _webhook2Controller = TextEditingController();
   final TextEditingController _filenameController = TextEditingController();
+
+  // Keep old single controller as alias for compatibility
+  TextEditingController get _webhookController => _activeWebhook == 1 ? _webhook1Controller : _webhook2Controller;
 
   @override
   void initState() {
@@ -226,18 +236,23 @@ class _MainScreenState extends State<MainScreen> {
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
 
-    final savedWebhook = prefs.getString('webhook_url');
+    final savedWebhook1 = prefs.getString('webhook1_url');
+    final savedWebhook2 = prefs.getString('webhook2_url');
+    final savedActiveWebhook = prefs.getInt('active_webhook');
     final savedFilename = prefs.getString('json_filename');
     final savedPassword = prefs.getString('current_password');
     final savedToken = prefs.getString('fcm_token');
 
     setState(() {
-      if (savedWebhook != null) _webhookUrl = savedWebhook;
+      if (savedWebhook1 != null) _webhook1Url = savedWebhook1;
+      if (savedWebhook2 != null) _webhook2Url = savedWebhook2;
+      if (savedActiveWebhook != null) _activeWebhook = savedActiveWebhook;
       if (savedFilename != null) _jsonFilename = savedFilename;
       _currentPassword = savedPassword ?? "";
       if (savedToken != null) _fcmToken = savedToken;
 
-      _webhookController.text = _webhookUrl;
+      _webhook1Controller.text = _webhook1Url;
+      _webhook2Controller.text = _webhook2Url;
       _filenameController.text = _jsonFilename;
       _passwordController.text = _currentPassword;
 
@@ -271,7 +286,9 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _saveData() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('webhook_url', _webhookUrl);
+    await prefs.setString('webhook1_url', _webhook1Url);
+    await prefs.setString('webhook2_url', _webhook2Url);
+    await prefs.setInt('active_webhook', _activeWebhook);
     await prefs.setString('json_filename', _jsonFilename);
     await prefs.setString('current_password', _currentPassword);
     await prefs.setString('accounts_list', json.encode(_accounts));
@@ -350,9 +367,10 @@ class _MainScreenState extends State<MainScreen> {
     _addLog("Error", "Timeout: job $jobId did not complete in time");
   }
 
-  // --- NEW: Check server status using 2-step API ---
+  // --- Check server status: routes to old or new system based on active webhook ---
   Future<void> _checkServerStatus() async {
-    if (_webhookUrl.isEmpty || !_webhookUrl.startsWith("http")) {
+    final url = _webhookUrl;
+    if (url.isEmpty || !url.startsWith("http")) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("Please set a valid Webhook URL in Settings first."),
@@ -382,53 +400,46 @@ class _MainScreenState extends State<MainScreen> {
         "accounts=${base64.encode(utf8.encode(convertedStr))}";
 
     try {
-      // Step 1: Push test data
-      final pushResponse = await http
+      final response = await http
           .post(
-            Uri.parse(_webhookUrl),
+            Uri.parse(url),
             headers: {'Content-Type': 'text/plain'},
             body: payload,
           )
           .timeout(const Duration(seconds: 10));
 
-      if (pushResponse.statusCode != 200) {
+      if (response.statusCode != 200 || response.body.isEmpty) {
         setState(() => _serverStatus = "OFF");
         return;
       }
 
-      final pushJson = jsonDecode(pushResponse.body);
-      final String? jobId = pushJson['job_id'];
-
-      if (jobId == null) {
+      dynamic decoded;
+      try {
+        decoded = jsonDecode(response.body);
+      } catch (_) {
         setState(() => _serverStatus = "OFF");
         return;
       }
 
-      // Step 2: Poll for result
-      final statusUrl =
-          Uri.parse("https://submitwork.org/api/status/$jobId");
-
-      for (int i = 0; i < 15; i++) {
-        await Future.delayed(const Duration(seconds: 2));
-
-        try {
-          final res = await http
-              .get(statusUrl)
-              .timeout(const Duration(seconds: 8));
-          final data = jsonDecode(res.body);
-
-          if (data['status'] == 'done') {
-            // Got a done response (even if failed) → server is ON and working
-            setState(() => _serverStatus = "ON");
-            return;
-          }
-        } catch (_) {
-          break;
+      if (_activeWebhook == 2) {
+        // New system: ON if response has a job_id
+        final String? jobId = decoded['job_id'];
+        setState(() => _serverStatus =
+            (jobId != null && jobId.isNotEmpty) ? "ON" : "OFF");
+      } else {
+        // Old system: ON if success_count or failed_count present
+        if (decoded is List && decoded.isNotEmpty) decoded = decoded[0];
+        if (decoded is Map) {
+          dynamic dataNode =
+              decoded['data'] is Map ? decoded['data'] : decoded;
+          int successCount = dataNode['success_count'] ?? 0;
+          int failedCount = dataNode['failed_count'] ?? 0;
+          setState(() => _serverStatus =
+              (successCount > 0 || failedCount > 0) ? "ON" : "OFF");
+        } else {
+          setState(() => _serverStatus = "OFF");
         }
       }
-
-      // If we got a job_id at all, server is alive
-      setState(() => _serverStatus = "ON");
     } catch (e) {
       setState(() => _serverStatus = "OFF");
     } finally {
@@ -436,16 +447,19 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  // --- NEW: Submit using 2-step API ---
+  // --- Submit: routes to old or new system based on active webhook ---
   Future<void> _submitData() async {
     final username = _usernameController.text.trim();
     final password = _passwordController.text.trim();
     final cookies = _cookiesController.text.trim();
 
-    // Sync state with field values
     _currentPassword = password;
-    _webhookUrl = _webhookController.text.trim();
     _jsonFilename = _filenameController.text.trim();
+    if (_activeWebhook == 1) {
+      _webhook1Url = _webhook1Controller.text.trim();
+    } else {
+      _webhook2Url = _webhook2Controller.text.trim();
+    }
 
     if (username.isEmpty || password.isEmpty) {
       _addLog("Error", "Username and Password required");
@@ -469,45 +483,94 @@ class _MainScreenState extends State<MainScreen> {
     String payload =
         "accounts=${base64.encode(utf8.encode(convertedStr))}";
 
-    try {
-      // Step 1: Push
-      final pushResponse = await http
-          .post(
-            Uri.parse(_webhookUrl),
-            headers: {'Content-Type': 'text/plain'},
-            body: payload,
-          )
-          .timeout(const Duration(seconds: 10));
-
-      if (pushResponse.body.isEmpty) {
-        _addLog("Error", "(${pushResponse.statusCode}) Empty response");
-        return;
-      }
-
-      dynamic pushJson;
+    if (_activeWebhook == 2) {
+      // --- New system: job_id polling ---
       try {
-        pushJson = jsonDecode(pushResponse.body);
-      } catch (_) {
-        _addLog("Error",
-            "(${pushResponse.statusCode}) Invalid JSON: ${pushResponse.body}");
-        return;
+        final pushResponse = await http
+            .post(
+              Uri.parse(_webhook2Url),
+              headers: {'Content-Type': 'text/plain'},
+              body: payload,
+            )
+            .timeout(const Duration(seconds: 10));
+
+        if (pushResponse.body.isEmpty) {
+          _addLog("Error", "(${pushResponse.statusCode}) Empty response");
+          return;
+        }
+
+        dynamic pushJson;
+        try {
+          pushJson = jsonDecode(pushResponse.body);
+        } catch (_) {
+          _addLog("Error",
+              "(${pushResponse.statusCode}) Invalid JSON: ${pushResponse.body}");
+          return;
+        }
+
+        final String? jobId = pushJson['job_id'];
+        if (jobId == null) {
+          final msg = pushJson['message'] ?? pushResponse.body;
+          _addLog("Error", "(${pushResponse.statusCode}) $msg");
+          return;
+        }
+
+        _addLog("Webhook", "Job submitted [$jobId] — waiting for result...");
+        await _pollJobStatus(jobId);
+      } catch (e) {
+        _addLog("Error", "Connection error: $e");
       }
+    } else {
+      // --- Old system: direct success_count/failed_count response ---
+      try {
+        final response = await http.post(
+          Uri.parse(_webhook1Url),
+          headers: {'Content-Type': 'text/plain'},
+          body: payload,
+        );
 
-      final String? jobId = pushJson['job_id'];
+        String logMessage = "Empty response";
+        String logStatus = (response.statusCode >= 200 &&
+                response.statusCode < 300)
+            ? "Webhook"
+            : "Error";
 
-      if (jobId == null) {
-        // Might be an error message from server
-        final msg = pushJson['message'] ?? pushResponse.body;
-        _addLog("Error", "(${pushResponse.statusCode}) $msg");
-        return;
+        if (response.body.isNotEmpty) {
+          try {
+            dynamic decoded = jsonDecode(response.body);
+            if (decoded is List && decoded.isNotEmpty) decoded = decoded[0];
+
+            if (decoded is Map) {
+              dynamic dataNode =
+                  decoded['data'] is Map ? decoded['data'] : decoded;
+              int successCount = dataNode['success_count'] ?? 0;
+              int failedCount = dataNode['failed_count'] ?? 0;
+
+              logMessage = "✓ Success: $successCount | ✗ Failed: $failedCount";
+
+              String logStyle = "normal";
+              if (successCount == 0) {
+                logStatus = "Error";
+              } else if (failedCount == 0) {
+                logStyle = "bold";
+              }
+
+              _addLog(logStatus, "(${response.statusCode}) $logMessage",
+                  style: logStyle);
+            } else {
+              logMessage = response.body.trim();
+              _addLog(logStatus, "(${response.statusCode}) $logMessage");
+            }
+          } catch (e) {
+            logMessage = "Invalid JSON response";
+            _addLog(logStatus, "(${response.statusCode}) $logMessage");
+          }
+        } else {
+          _addLog(logStatus, "(${response.statusCode}) $logMessage");
+        }
+      } catch (e) {
+        _addLog("Error", "Connection error: $e");
       }
-
-      _addLog("Webhook", "Job submitted [$jobId] — waiting for result...");
-
-      // Step 2: Poll status
-      await _pollJobStatus(jobId);
-    } catch (e) {
-      _addLog("Error", "Connection error: $e");
     }
 
     _usernameController.clear();
@@ -1154,8 +1217,9 @@ class _MainScreenState extends State<MainScreen> {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Device Token Section
+          // FCM Device Token
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
@@ -1180,8 +1244,7 @@ class _MainScreenState extends State<MainScreen> {
                             ClipboardData(text: _fcmToken));
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
-                            content:
-                                Text("Token copied to clipboard"),
+                            content: Text("Token copied to clipboard"),
                             backgroundColor: Colors.green,
                           ),
                         );
@@ -1202,18 +1265,102 @@ class _MainScreenState extends State<MainScreen> {
               ],
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 24),
 
-          // Webhook Input
+          // Active Webhook Selector
+          const Text("Active Webhook",
+              style: TextStyle(
+                  color: Color(0xff94a3b8),
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xff111827),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xff1f2937)),
+            ),
+            child: Column(
+              children: [
+                _buildWebhookRadio(
+                  value: 1,
+                  label: "Webhook 1 — Direct System",
+                  subtitle: "Parses success/failed counts instantly",
+                  color: const Color(0xff22c55e),
+                ),
+                Divider(height: 1, color: const Color(0xff1f2937)),
+                _buildWebhookRadio(
+                  value: 2,
+                  label: "Webhook 2 — Job ID System",
+                  subtitle: "submitwork.org async job_id API",
+                  color: const Color(0xff3b82f6),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // Webhook 1 URL
+          Row(
+            children: [
+              Container(
+                width: 10,
+                height: 10,
+                margin: const EdgeInsets.only(right: 8),
+                decoration: const BoxDecoration(
+                  color: Color(0xff22c55e),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const Text("Webhook 1 URL (Direct)",
+                  style: TextStyle(color: Color(0xff94a3b8), fontSize: 12)),
+            ],
+          ),
+          const SizedBox(height: 6),
           TextField(
-            controller: _webhookController,
-            style: const TextStyle(color: Colors.white),
-            decoration: const InputDecoration(
-              labelText: "Webhook URL",
-              border: OutlineInputBorder(),
+            controller: _webhook1Controller,
+            style: const TextStyle(color: Colors.white, fontSize: 13),
+            decoration: InputDecoration(
+              border: const OutlineInputBorder(),
+              suffixIcon: _activeWebhook == 1
+                  ? const Icon(Icons.check_circle,
+                      color: Color(0xff22c55e), size: 18)
+                  : null,
             ),
           ),
           const SizedBox(height: 20),
+
+          // Webhook 2 URL
+          Row(
+            children: [
+              Container(
+                width: 10,
+                height: 10,
+                margin: const EdgeInsets.only(right: 8),
+                decoration: const BoxDecoration(
+                  color: Color(0xff3b82f6),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const Text("Webhook 2 URL (Job ID)",
+                  style: TextStyle(color: Color(0xff94a3b8), fontSize: 12)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          TextField(
+            controller: _webhook2Controller,
+            style: const TextStyle(color: Colors.white, fontSize: 13),
+            decoration: InputDecoration(
+              border: const OutlineInputBorder(),
+              suffixIcon: _activeWebhook == 2
+                  ? const Icon(Icons.check_circle,
+                      color: Color(0xff3b82f6), size: 18)
+                  : null,
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // JSON Filename
           TextField(
             controller: _filenameController,
             style: const TextStyle(color: Colors.white),
@@ -1223,18 +1370,21 @@ class _MainScreenState extends State<MainScreen> {
             ),
           ),
           const SizedBox(height: 30),
+
           SizedBox(
             width: double.infinity,
             child: OutlinedButton(
               onPressed: () {
                 setState(() {
-                  _webhookUrl = _webhookController.text.trim();
+                  _webhook1Url = _webhook1Controller.text.trim();
+                  _webhook2Url = _webhook2Controller.text.trim();
                   _jsonFilename = _filenameController.text.trim();
                 });
                 _saveData();
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text("Settings Saved"),
+                  SnackBar(
+                    content: Text(
+                        "Settings Saved — Active: Webhook $_activeWebhook"),
                     backgroundColor: Colors.green,
                   ),
                 );
@@ -1243,6 +1393,71 @@ class _MainScreenState extends State<MainScreen> {
             ),
           )
         ],
+      ),
+    );
+  }
+
+  Widget _buildWebhookRadio({
+    required int value,
+    required String label,
+    required String subtitle,
+    required Color color,
+  }) {
+    final bool isSelected = _activeWebhook == value;
+    return InkWell(
+      onTap: () => setState(() => _activeWebhook = value),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            Radio<int>(
+              value: value,
+              groupValue: _activeWebhook,
+              onChanged: (v) => setState(() => _activeWebhook = v!),
+              activeColor: color,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: isSelected ? Colors.white : const Color(0xff94a3b8),
+                      fontSize: 13,
+                      fontWeight: isSelected
+                          ? FontWeight.bold
+                          : FontWeight.normal,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                        color: Color(0xff475569), fontSize: 11),
+                  ),
+                ],
+              ),
+            ),
+            if (isSelected)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  "ACTIVE",
+                  style: TextStyle(
+                      color: color,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
