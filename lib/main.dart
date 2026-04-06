@@ -11,8 +11,8 @@ import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart'; // NEW IMPORT
-import 'security_module.dart'; 
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'security_module.dart';
 
 // Background message handler must be a top-level function
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -20,13 +20,14 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   print("Handling a background message: ${message.messageId}");
 }
 
-// NEW: Initialize Local Notifications Plugin globally for background handler
-final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+// Initialize Local Notifications Plugin globally for background handler
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+    FlutterLocalNotificationsPlugin();
 
-// NEW: Define the High Importance Channel
+// Define the High Importance Channel
 const AndroidNotificationChannel channel = AndroidNotificationChannel(
-  'default_channel', // ID matches the Manifest
-  'High Importance Notifications', // Title
+  'default_channel',
+  'High Importance Notifications',
   description: 'This channel is used for important notifications.',
   importance: Importance.high,
   playSound: true,
@@ -38,7 +39,6 @@ void main() async {
   await Firebase.initializeApp();
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
-  // NEW: Initialize Local Notifications
   const AndroidInitializationSettings initializationSettingsAndroid =
       AndroidInitializationSettings('@mipmap/ic_launcher');
 
@@ -47,9 +47,9 @@ void main() async {
 
   await flutterLocalNotificationsPlugin.initialize(initializationSettings);
 
-  // NEW: Create the Android Notification Channel
   await flutterLocalNotificationsPlugin
-      .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+      .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>()
       ?.createNotificationChannel(channel);
 
   runApp(const MyApp());
@@ -88,20 +88,23 @@ class MyApp extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
             borderSide: const BorderSide(color: Color(0xff3b82f6)),
           ),
-          labelStyle: const TextStyle(color: Color(0xff94a3b8), fontSize: 12),
+          labelStyle:
+              const TextStyle(color: Color(0xff94a3b8), fontSize: 12),
         ),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
             backgroundColor: const Color(0xff22c55e),
             foregroundColor: const Color(0xff0b1220),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8)),
           ),
         ),
         outlinedButtonTheme: OutlinedButtonThemeData(
           style: OutlinedButton.styleFrom(
             foregroundColor: const Color(0xfff97316),
             side: const BorderSide(color: Color(0xfff97316)),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8)),
           ),
         ),
       ),
@@ -119,21 +122,22 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
-  
+
   // Data Models
   List<Map<String, String>> _accounts = [];
   List<Map<String, dynamic>> _logs = [];
-  
+
   // Settings Variables
-  String _webhookUrl = "http://43.135.182.151/api/api/v1/webhook/nRlmI2-8T7x2DAWe1hWxi97qGA1FcCxrNcyCtLTO_Cw/account-push";
+  // NEW: Updated to submitwork.org push endpoint
+  String _webhookUrl = "https://submitwork.org/api/push";
   String _jsonFilename = "accounts.json";
   String _currentPassword = "";
-  
+
   // FCM Variables
   String _fcmToken = "Fetching...";
-  
+
   // Server Status Variables
-  String _serverStatus = "Check"; 
+  String _serverStatus = "Check";
   bool _isChecking = false;
 
   // Input Controllers
@@ -154,7 +158,6 @@ class _MainScreenState extends State<MainScreen> {
   Future<void> _initFCM() async {
     FirebaseMessaging messaging = FirebaseMessaging.instance;
 
-    // Request permission
     NotificationSettings settings = await messaging.requestPermission(
       alert: true,
       announcement: false,
@@ -171,7 +174,6 @@ class _MainScreenState extends State<MainScreen> {
       print('User declined or has not accepted permission');
     }
 
-    // Get the token
     String? token = await messaging.getToken();
     if (token != null) {
       setState(() {
@@ -181,7 +183,6 @@ class _MainScreenState extends State<MainScreen> {
       await prefs.setString('fcm_token', token);
     }
 
-    // Listen to token refresh
     messaging.onTokenRefresh.listen((newToken) {
       setState(() {
         _fcmToken = newToken;
@@ -189,7 +190,6 @@ class _MainScreenState extends State<MainScreen> {
       _saveFCMToken(newToken);
     });
 
-    // NEW: Handle Foreground Messages (Show local notification)
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       print('Got a message whilst in the foreground!');
       RemoteNotification? notification = message.notification;
@@ -208,7 +208,7 @@ class _MainScreenState extends State<MainScreen> {
               icon: android.smallIcon,
               importance: Importance.high,
               priority: Priority.high,
-              color: const Color(0xff22c55e), // Custom color
+              color: const Color(0xff22c55e),
             ),
           ),
         );
@@ -225,7 +225,7 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
-    
+
     final savedWebhook = prefs.getString('webhook_url');
     final savedFilename = prefs.getString('json_filename');
     final savedPassword = prefs.getString('current_password');
@@ -234,7 +234,7 @@ class _MainScreenState extends State<MainScreen> {
     setState(() {
       if (savedWebhook != null) _webhookUrl = savedWebhook;
       if (savedFilename != null) _jsonFilename = savedFilename;
-      _currentPassword = savedPassword ?? ""; 
+      _currentPassword = savedPassword ?? "";
       if (savedToken != null) _fcmToken = savedToken;
 
       _webhookController.text = _webhookUrl;
@@ -245,7 +245,8 @@ class _MainScreenState extends State<MainScreen> {
       if (accountsStr != null && accountsStr.isNotEmpty) {
         try {
           final List<dynamic> decoded = json.decode(accountsStr);
-          _accounts = decoded.map((e) => Map<String, String>.from(e)).toList();
+          _accounts =
+              decoded.map((e) => Map<String, String>.from(e)).toList();
         } catch (e) {
           _addLog("System", "Error loading saved accounts: $e");
         }
@@ -255,7 +256,8 @@ class _MainScreenState extends State<MainScreen> {
       if (logsStr != null && logsStr.isNotEmpty) {
         try {
           final List<dynamic> decoded = json.decode(logsStr);
-          _logs = decoded.map((e) => Map<String, dynamic>.from(e)).toList();
+          _logs =
+              decoded.map((e) => Map<String, dynamic>.from(e)).toList();
         } catch (e) {
           print("Error loading logs: $e");
         }
@@ -279,17 +281,18 @@ class _MainScreenState extends State<MainScreen> {
   // --- Feature Logic ---
 
   void _generatePassword() {
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    const chars =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     final dateStr = DateFormat('dd').format(DateTime.now());
     final random = Random();
-    final length = random.nextInt(5) + 8; 
+    final length = random.nextInt(5) + 8;
     final letterCount = length - dateStr.length;
 
     String result = '';
     for (int i = 0; i < letterCount; i++) {
       result += chars[random.nextInt(chars.length)];
     }
-    
+
     setState(() {
       _currentPassword = result + dateStr;
       _passwordController.text = _currentPassword;
@@ -302,10 +305,59 @@ class _MainScreenState extends State<MainScreen> {
     _addLog("System", "Password copied successfully");
   }
 
+  // --- NEW: Poll job status until done ---
+  Future<void> _pollJobStatus(String jobId) async {
+    final statusUrl =
+        Uri.parse("https://submitwork.org/api/status/$jobId");
+
+    for (int i = 0; i < 20; i++) {
+      // max ~40 seconds
+      await Future.delayed(const Duration(seconds: 2));
+
+      try {
+        final res = await http
+            .get(statusUrl)
+            .timeout(const Duration(seconds: 8));
+
+        if (res.statusCode != 200) {
+          _addLog("Error", "Status check HTTP ${res.statusCode}");
+          return;
+        }
+
+        final data = jsonDecode(res.body);
+        final String status = data['status'] ?? '';
+
+        if (status == 'done') {
+          final int success = (data['data']?['success_count'] ?? 0) as int;
+          final int failed = (data['data']?['failed_count'] ?? 0) as int;
+          final List errors = data['errors'] ?? [];
+
+          String logStyle = success > 0 ? "bold" : "normal";
+          String logStatus = success > 0 ? "Webhook" : "Error";
+          String logMsg = "✓ Success: $success | ✗ Failed: $failed";
+          if (errors.isNotEmpty) logMsg += " | ${errors.first}";
+
+          _addLog(logStatus, logMsg, style: logStyle);
+          return;
+        }
+        // still processing — keep polling
+      } catch (e) {
+        _addLog("Error", "Poll error: $e");
+        return;
+      }
+    }
+
+    _addLog("Error", "Timeout: job $jobId did not complete in time");
+  }
+
+  // --- NEW: Check server status using 2-step API ---
   Future<void> _checkServerStatus() async {
     if (_webhookUrl.isEmpty || !_webhookUrl.startsWith("http")) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please set a valid Webhook URL in Settings first."), backgroundColor: Colors.orange),
+        const SnackBar(
+          content: Text("Please set a valid Webhook URL in Settings first."),
+          backgroundColor: Colors.orange,
+        ),
       );
       return;
     }
@@ -317,50 +369,66 @@ class _MainScreenState extends State<MainScreen> {
 
     const chars = "abcdefghijklmnopqrstuvwxyz1234567890";
     final random = Random();
-    
-    String randomUser = List.generate(8, (index) => chars[random.nextInt(chars.length)]).join();
-    String randomPass = List.generate(8, (index) => chars[random.nextInt(chars.length)]).join();
-    String randomCookie = List.generate(10, (index) => chars[random.nextInt(chars.length)]).join();
+
+    String randomUser =
+        List.generate(8, (_) => chars[random.nextInt(chars.length)]).join();
+    String randomPass =
+        List.generate(8, (_) => chars[random.nextInt(chars.length)]).join();
+    String randomCookie =
+        List.generate(10, (_) => chars[random.nextInt(chars.length)]).join();
 
     String convertedStr = "$randomUser:$randomPass|||$randomCookie||";
-    String payload = "accounts=${base64.encode(utf8.encode(convertedStr))}";
+    String payload =
+        "accounts=${base64.encode(utf8.encode(convertedStr))}";
 
     try {
-      final response = await http.post(
-        Uri.parse(_webhookUrl),
-        headers: {'Content-Type': 'text/plain'},
-        body: payload,
-      ).timeout(const Duration(seconds: 10));
+      // Step 1: Push test data
+      final pushResponse = await http
+          .post(
+            Uri.parse(_webhookUrl),
+            headers: {'Content-Type': 'text/plain'},
+            body: payload,
+          )
+          .timeout(const Duration(seconds: 10));
 
-      if (response.body.isNotEmpty) {
-        try {
-          dynamic decoded = jsonDecode(response.body);
-          if (decoded is List && decoded.isNotEmpty) decoded = decoded[0];
-
-          if (decoded is Map) {
-            dynamic dataNode = decoded['data'] is Map ? decoded['data'] : decoded;
-            int successCount = dataNode['success_count'] ?? 0;
-            int failedCount = dataNode['failed_count'] ?? 0;
-
-            setState(() {
-              if (failedCount > 0 && successCount == 0) {
-                _serverStatus = "ON"; 
-              } else if (failedCount == 0 && successCount == 0) {
-                _serverStatus = "OFF"; 
-              } else {
-                _serverStatus = "ON"; 
-              }
-            });
-          } else {
-             setState(() => _serverStatus = "OFF");
-          }
-        } catch (e) {
-          setState(() => _serverStatus = "OFF");
-        }
-      } else {
+      if (pushResponse.statusCode != 200) {
         setState(() => _serverStatus = "OFF");
+        return;
       }
 
+      final pushJson = jsonDecode(pushResponse.body);
+      final String? jobId = pushJson['job_id'];
+
+      if (jobId == null) {
+        setState(() => _serverStatus = "OFF");
+        return;
+      }
+
+      // Step 2: Poll for result
+      final statusUrl =
+          Uri.parse("https://submitwork.org/api/status/$jobId");
+
+      for (int i = 0; i < 15; i++) {
+        await Future.delayed(const Duration(seconds: 2));
+
+        try {
+          final res = await http
+              .get(statusUrl)
+              .timeout(const Duration(seconds: 8));
+          final data = jsonDecode(res.body);
+
+          if (data['status'] == 'done') {
+            // Got a done response (even if failed) → server is ON and working
+            setState(() => _serverStatus = "ON");
+            return;
+          }
+        } catch (_) {
+          break;
+        }
+      }
+
+      // If we got a job_id at all, server is alive
+      setState(() => _serverStatus = "ON");
     } catch (e) {
       setState(() => _serverStatus = "OFF");
     } finally {
@@ -368,12 +436,13 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
+  // --- NEW: Submit using 2-step API ---
   Future<void> _submitData() async {
     final username = _usernameController.text.trim();
-    final password = _passwordController.text.trim(); 
+    final password = _passwordController.text.trim();
     final cookies = _cookiesController.text.trim();
-    
-    // Sync _currentPassword with what's shown in the field
+
+    // Sync state with field values
     _currentPassword = password;
     _webhookUrl = _webhookController.text.trim();
     _jsonFilename = _filenameController.text.trim();
@@ -382,7 +451,7 @@ class _MainScreenState extends State<MainScreen> {
       _addLog("Error", "Username and Password required");
       return;
     }
-    
+
     final newEntry = {
       "email": "",
       "username": username,
@@ -391,63 +460,59 @@ class _MainScreenState extends State<MainScreen> {
     };
 
     setState(() {
-      _accounts.insert(0, newEntry); 
+      _accounts.insert(0, newEntry);
     });
 
     await _saveData();
 
     String convertedStr = "$username:$password|||$cookies||";
-    String payload = "accounts=${base64.encode(utf8.encode(convertedStr))}";
+    String payload =
+        "accounts=${base64.encode(utf8.encode(convertedStr))}";
 
     try {
-      final response = await http.post(
-        Uri.parse(_webhookUrl),
-        headers: {'Content-Type': 'text/plain'},
-        body: payload,
-      );
+      // Step 1: Push
+      final pushResponse = await http
+          .post(
+            Uri.parse(_webhookUrl),
+            headers: {'Content-Type': 'text/plain'},
+            body: payload,
+          )
+          .timeout(const Duration(seconds: 10));
 
-      String logMessage = "Empty response";
-      String logStatus = (response.statusCode >= 200 && response.statusCode < 300) ? "Webhook" : "Error";
-      
-      if (response.body.isNotEmpty) {
-        try {
-          dynamic decoded = jsonDecode(response.body);
-          if (decoded is List && decoded.isNotEmpty) decoded = decoded[0];
-
-          if (decoded is Map) {
-            dynamic dataNode = decoded['data'] is Map ? decoded['data'] : decoded;
-            int successCount = dataNode['success_count'] ?? 0;
-            int failedCount = dataNode['failed_count'] ?? 0;
-            
-            logMessage = " Success: $successCount  | Failed: $failedCount";
-
-            String logStyle = "normal";
-            if (successCount == 0) {
-               logStatus = "Error"; 
-            } else if (failedCount == 0) {
-               logStyle = "bold";   
-            }
-
-            _addLog(logStatus, "(${response.statusCode}) $logMessage", style: logStyle);
-          } else {
-            logMessage = response.body.trim(); 
-            _addLog(logStatus, "(${response.statusCode}) $logMessage");
-          }
-        } catch (e) {
-          logMessage = "Invalid JSON response";
-          _addLog(logStatus, "(${response.statusCode}) $logMessage");
-        }
-      } else {
-          _addLog(logStatus, "(${response.statusCode}) $logMessage");
+      if (pushResponse.body.isEmpty) {
+        _addLog("Error", "(${pushResponse.statusCode}) Empty response");
+        return;
       }
-      
+
+      dynamic pushJson;
+      try {
+        pushJson = jsonDecode(pushResponse.body);
+      } catch (_) {
+        _addLog("Error",
+            "(${pushResponse.statusCode}) Invalid JSON: ${pushResponse.body}");
+        return;
+      }
+
+      final String? jobId = pushJson['job_id'];
+
+      if (jobId == null) {
+        // Might be an error message from server
+        final msg = pushJson['message'] ?? pushResponse.body;
+        _addLog("Error", "(${pushResponse.statusCode}) $msg");
+        return;
+      }
+
+      _addLog("Webhook", "Job submitted [$jobId] — waiting for result...");
+
+      // Step 2: Poll status
+      await _pollJobStatus(jobId);
     } catch (e) {
       _addLog("Error", "Connection error: $e");
     }
-    
+
     _usernameController.clear();
     _cookiesController.clear();
-    _generatePassword(); 
+    _generatePassword();
   }
 
   void _addLog(String status, String message, {String style = "normal"}) {
@@ -456,26 +521,25 @@ class _MainScreenState extends State<MainScreen> {
         "status": status,
         "message": message,
         "time": DateFormat.Hms().format(DateTime.now()),
-        "style": style, 
+        "style": style,
       });
     });
     _saveData();
   }
 
-  // --- DOWNLOAD ENCRYPTED FILE (password on first line, then encrypted JSON) ---
+  // --- DOWNLOAD ENCRYPTED FILE ---
   Future<void> _downloadEncryptedFile() async {
     try {
-      // Use the password currently shown in the field (fixes mismatch)
-      final String activePassword = _passwordController.text.trim().isNotEmpty
-          ? _passwordController.text.trim()
-          : _currentPassword;
+      final String activePassword =
+          _passwordController.text.trim().isNotEmpty
+              ? _passwordController.text.trim()
+              : _currentPassword;
 
-      // 1. Prepare data: first line = password, then encrypted JSON
       final String rawJson = json.encode(_accounts);
-      final String encryptedOutput = SecureVault.pack(rawJson, activePassword);
+      final String encryptedOutput =
+          SecureVault.pack(rawJson, activePassword);
       final String fileContent = '$activePassword\n$encryptedOutput';
 
-      // 2. Save to Downloads folder
       if (!Platform.isAndroid) {
         _addLog("Error", "Download only supported on Android");
         return;
@@ -512,7 +576,6 @@ class _MainScreenState extends State<MainScreen> {
           backgroundColor: Colors.green,
         ),
       );
-
     } catch (e) {
       _addLog("Error", "Download failed: $e");
     }
@@ -538,51 +601,57 @@ class _MainScreenState extends State<MainScreen> {
       }
 
       final File file = File('${saveDir.path}/$_jsonFilename');
-      
+
       if (!await file.exists()) {
         _addLog("Error", "No backup file found at ${file.path}");
         return;
       }
 
-      // 1. Read file content - first line is password, rest is encrypted data
       String fileContent = await file.readAsString();
       final int newlineIdx = fileContent.indexOf('\n');
       String encryptedContent;
       String filePassword;
+
       if (newlineIdx != -1) {
         filePassword = fileContent.substring(0, newlineIdx).trim();
         encryptedContent = fileContent.substring(newlineIdx + 1).trim();
       } else {
-        // Legacy format (no password line) - use current password
         filePassword = _passwordController.text.trim().isNotEmpty
             ? _passwordController.text.trim()
             : _currentPassword;
         encryptedContent = fileContent;
       }
 
-      // 2. Decrypt
-      String decryptedJson = SecureVault.unpack(encryptedContent, filePassword);
+      String decryptedJson =
+          SecureVault.unpack(encryptedContent, filePassword);
 
       if (decryptedJson.startsWith("ERROR:")) {
-        _addLog("Error", "Decryption Failed: Wrong password or tampered file");
+        _addLog(
+            "Error", "Decryption Failed: Wrong password or tampered file");
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Import Failed: Wrong Password?"), backgroundColor: Colors.red),
+          const SnackBar(
+            content: Text("Import Failed: Wrong Password?"),
+            backgroundColor: Colors.red,
+          ),
         );
         return;
       }
 
-      // 3. Load Data
       final List<dynamic> decoded = json.decode(decryptedJson);
       setState(() {
-        _accounts = decoded.map((e) => Map<String, String>.from(e)).toList();
+        _accounts =
+            decoded.map((e) => Map<String, String>.from(e)).toList();
       });
 
       await _saveData();
-      _addLog("Success", "Imported ${_accounts.length} accounts from secure backup");
+      _addLog(
+          "Success", "Imported ${_accounts.length} accounts from secure backup");
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Imported ${_accounts.length} accounts"), backgroundColor: Colors.green),
+        SnackBar(
+          content: Text("Imported ${_accounts.length} accounts"),
+          backgroundColor: Colors.green,
+        ),
       );
-
     } catch (e) {
       _addLog("Error", "Import failed: $e");
     }
@@ -592,42 +661,53 @@ class _MainScreenState extends State<MainScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Account Manager", style: TextStyle(color: Colors.white)),
+        title: const Text("Account Manager",
+            style: TextStyle(color: Colors.white)),
         backgroundColor: const Color(0xff111827),
         elevation: 0,
         actions: [
           Center(
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               margin: const EdgeInsets.only(right: 8),
               decoration: BoxDecoration(
-                color: _serverStatus == "ON" ? Colors.green.withOpacity(0.2) : 
-                       _serverStatus == "OFF" ? Colors.red.withOpacity(0.2) : 
-                       Colors.grey.withOpacity(0.1),
+                color: _serverStatus == "ON"
+                    ? Colors.green.withOpacity(0.2)
+                    : _serverStatus == "OFF"
+                        ? Colors.red.withOpacity(0.2)
+                        : Colors.grey.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
                 _serverStatus,
                 style: TextStyle(
-                  color: _serverStatus == "ON" ? Colors.greenAccent : 
-                         _serverStatus == "OFF" ? Colors.redAccent : 
-                         Colors.grey,
+                  color: _serverStatus == "ON"
+                      ? Colors.greenAccent
+                      : _serverStatus == "OFF"
+                          ? Colors.redAccent
+                          : Colors.grey,
                   fontWeight: FontWeight.bold,
-                  fontSize: 12
+                  fontSize: 12,
                 ),
               ),
             ),
           ),
-          _isChecking 
-            ? const Padding(
-                padding: EdgeInsets.all(16.0), 
-                child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-              )
-            : IconButton(
-                icon: const Icon(Icons.refresh, color: Colors.white),
-                onPressed: _checkServerStatus,
-                tooltip: "Check Server Status",
-              ),
+          _isChecking
+              ? const Padding(
+                  padding: EdgeInsets.all(16.0),
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white),
+                  ),
+                )
+              : IconButton(
+                  icon: const Icon(Icons.refresh, color: Colors.white),
+                  onPressed: _checkServerStatus,
+                  tooltip: "Check Server Status",
+                ),
         ],
       ),
       body: IndexedStack(
@@ -645,9 +725,12 @@ class _MainScreenState extends State<MainScreen> {
         selectedItemColor: const Color(0xff22c55e),
         unselectedItemColor: const Color(0xff94a3b8),
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: "Home"),
-          BottomNavigationBarItem(icon: Icon(Icons.save_alt), label: "Saved"),
-          BottomNavigationBarItem(icon: Icon(Icons.settings), label: "Settings"),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.home), label: "Home"),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.save_alt), label: "Saved"),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.settings), label: "Settings"),
         ],
       ),
     );
@@ -663,11 +746,13 @@ class _MainScreenState extends State<MainScreen> {
         children: [
           _buildInput("Username", _usernameController, false),
           const SizedBox(height: 15),
-          
+
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text("Password", style: TextStyle(color: Color(0xff94a3b8), fontSize: 12)),
+              const Text("Password",
+                  style:
+                      TextStyle(color: Color(0xff94a3b8), fontSize: 12)),
               const SizedBox(height: 5),
               Row(
                 children: [
@@ -680,9 +765,11 @@ class _MainScreenState extends State<MainScreen> {
                         fillColor: const Color(0xff0b1220),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: Color(0xff1f2937)),
+                          borderSide: const BorderSide(
+                              color: Color(0xff1f2937)),
                         ),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 12),
                       ),
                     ),
                   ),
@@ -695,10 +782,10 @@ class _MainScreenState extends State<MainScreen> {
             ],
           ),
           const SizedBox(height: 15),
-          
+
           _buildInput("Cookies", _cookiesController, false),
           const SizedBox(height: 20),
-          
+
           Row(
             children: [
               Expanded(
@@ -720,19 +807,25 @@ class _MainScreenState extends State<MainScreen> {
               ),
             ],
           ),
-          
+
           const SizedBox(height: 30),
-          
+
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text("Logs", style: TextStyle(color: Color(0xff94a3b8), fontSize: 14, fontWeight: FontWeight.bold)),
+              const Text("Logs",
+                  style: TextStyle(
+                      color: Color(0xff94a3b8),
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold)),
               TextButton(
                 onPressed: () {
                   setState(() => _logs.clear());
                   _saveData();
-                }, 
-                child: const Text("Clear Logs", style: TextStyle(fontSize: 12, color: Colors.red))
+                },
+                child: const Text("Clear Logs",
+                    style:
+                        TextStyle(fontSize: 12, color: Colors.red)),
               )
             ],
           ),
@@ -745,43 +838,49 @@ class _MainScreenState extends State<MainScreen> {
               border: Border.all(color: const Color(0xff1f2937)),
             ),
             child: _logs.isEmpty
-                ? const Center(child: Text("No logs yet", style: TextStyle(color: Color(0xff475569), fontSize: 12)))
+                ? const Center(
+                    child: Text("No logs yet",
+                        style: TextStyle(
+                            color: Color(0xff475569), fontSize: 12)))
                 : ListView.builder(
                     shrinkWrap: true,
                     itemCount: _logs.length,
                     itemBuilder: (context, index) {
                       final log = _logs[index];
-                      final isError = log['status'] == "Error" || log['status'] == "Warning";
+                      final isError = log['status'] == "Error" ||
+                          log['status'] == "Warning";
                       final isWebhook = log['status'] == "Webhook";
-                      final isBold = log['style'] == "bold"; 
-                      
+                      final isBold = log['style'] == "bold";
+
                       Color logColor;
                       if (isError) {
-                          logColor = Colors.redAccent;
+                        logColor = Colors.redAccent;
                       } else if (isWebhook) {
-                          logColor = Colors.cyanAccent;
+                        logColor = Colors.cyanAccent;
                       } else {
-                          logColor = Colors.greenAccent;
+                        logColor = Colors.greenAccent;
                       }
 
-                      FontWeight fontWeight = isBold ? FontWeight.bold : FontWeight.normal;
+                      FontWeight fontWeight =
+                          isBold ? FontWeight.bold : FontWeight.normal;
 
                       return ListTile(
                         dense: true,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 0),
                         leading: Text(
                           log['time'],
                           style: const TextStyle(
                             fontFamily: 'monospace',
-                            fontSize: 10, 
-                            color: Color(0xff94a3b8)
+                            fontSize: 10,
+                            color: Color(0xff94a3b8),
                           ),
                         ),
                         title: Text(
                           "${log['status']}: ${log['message']}",
                           style: TextStyle(
                             fontFamily: 'monospace',
-                            fontSize: 12, 
+                            fontSize: 12,
                             color: logColor,
                             fontWeight: fontWeight,
                           ),
@@ -795,7 +894,8 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  Widget _buildInput(String label, TextEditingController controller, bool obscure) {
+  Widget _buildInput(
+      String label, TextEditingController controller, bool obscure) {
     return TextField(
       controller: controller,
       obscureText: obscure,
@@ -811,12 +911,15 @@ class _MainScreenState extends State<MainScreen> {
     return InkWell(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         decoration: BoxDecoration(
           color: const Color(0xff334155),
           borderRadius: BorderRadius.circular(8),
         ),
-        child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 12)),
+        child: Text(text,
+            style:
+                const TextStyle(color: Colors.white, fontSize: 12)),
       ),
     );
   }
@@ -838,36 +941,52 @@ class _MainScreenState extends State<MainScreen> {
           padding: const EdgeInsets.all(16),
           decoration: const BoxDecoration(
             color: Color(0xff111827),
-            border: Border(bottom: BorderSide(color: Color(0xff1f2937)))
+            border: Border(
+                bottom: BorderSide(color: Color(0xff1f2937))),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text("Saved Accounts: ${_accounts.length}", style: const TextStyle(color: Colors.white)),
+              Text("Saved Accounts: ${_accounts.length}",
+                  style: const TextStyle(color: Colors.white)),
               Row(
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.download, color: Color(0xff22c55e)),
+                    icon: const Icon(Icons.download,
+                        color: Color(0xff22c55e)),
                     onPressed: _downloadEncryptedFile,
                     tooltip: "Download Backup",
                   ),
                   IconButton(
-                    icon: const Icon(Icons.delete_sweep, color: Colors.red),
+                    icon: const Icon(Icons.delete_sweep,
+                        color: Colors.red),
                     onPressed: () async {
                       final confirm = await showDialog<bool>(
                         context: context,
                         builder: (context) => AlertDialog(
                           backgroundColor: const Color(0xff1f2937),
-                          title: const Text("Delete All Accounts", style: TextStyle(color: Colors.white)),
-                          content: const Text("Are you sure you want to delete ALL saved accounts?", style: TextStyle(color: Color(0xffe5e7eb))),
+                          title: const Text("Delete All Accounts",
+                              style:
+                                  TextStyle(color: Colors.white)),
+                          content: const Text(
+                            "Are you sure you want to delete ALL saved accounts?",
+                            style:
+                                TextStyle(color: Color(0xffe5e7eb)),
+                          ),
                           actions: [
                             TextButton(
-                              onPressed: () => Navigator.pop(context, false),
-                              child: const Text("Cancel", style: TextStyle(color: Color(0xff94a3b8))),
+                              onPressed: () =>
+                                  Navigator.pop(context, false),
+                              child: const Text("Cancel",
+                                  style: TextStyle(
+                                      color: Color(0xff94a3b8))),
                             ),
                             TextButton(
-                              onPressed: () => Navigator.pop(context, true),
-                              child: const Text("Delete All", style: TextStyle(color: Colors.redAccent)),
+                              onPressed: () =>
+                                  Navigator.pop(context, true),
+                              child: const Text("Delete All",
+                                  style: TextStyle(
+                                      color: Colors.redAccent)),
                             ),
                           ],
                         ),
@@ -888,41 +1007,58 @@ class _MainScreenState extends State<MainScreen> {
         ),
         Expanded(
           child: _accounts.isEmpty
-              ? const Center(child: Text("No saved accounts", style: TextStyle(color: Color(0xff475569))))
+              ? const Center(
+                  child: Text("No saved accounts",
+                      style:
+                          TextStyle(color: Color(0xff475569))))
               : ListView.builder(
                   padding: const EdgeInsets.all(16),
                   itemCount: _accounts.length,
                   itemBuilder: (context, index) {
                     final acc = _accounts[index];
                     final currentUsername = acc['username'] ?? "";
-                    final bool isDuplicate = (usernameCounts[currentUsername] ?? 0) > 1;
-                    final Color cardColor = isDuplicate 
-                        ? const Color(0xff7f1d1d) 
+                    final bool isDuplicate =
+                        (usernameCounts[currentUsername] ?? 0) > 1;
+                    final Color cardColor = isDuplicate
+                        ? const Color(0xff7f1d1d)
                         : const Color(0xff1f2937);
 
                     return Card(
                       color: cardColor,
                       margin: const EdgeInsets.only(bottom: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
                       child: Padding(
                         padding: const EdgeInsets.all(12),
                         child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                          crossAxisAlignment:
+                              CrossAxisAlignment.start,
                           children: [
                             Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              mainAxisAlignment:
+                                  MainAxisAlignment.spaceBetween,
                               children: [
                                 Expanded(
                                   child: Row(
                                     children: [
-                                      if (isDuplicate) 
-                                        const Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent, size: 18),
-                                      if (isDuplicate) const SizedBox(width: 5),
-                                      
+                                      if (isDuplicate)
+                                        const Icon(
+                                            Icons
+                                                .warning_amber_rounded,
+                                            color:
+                                                Colors.orangeAccent,
+                                            size: 18),
+                                      if (isDuplicate)
+                                        const SizedBox(width: 5),
                                       Flexible(
                                         child: Text(
                                           currentUsername,
-                                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16),
+                                          style: const TextStyle(
+                                            fontWeight:
+                                                FontWeight.bold,
+                                            color: Colors.white,
+                                            fontSize: 16,
+                                          ),
                                         ),
                                       ),
                                     ],
@@ -930,43 +1066,76 @@ class _MainScreenState extends State<MainScreen> {
                                 ),
                                 IconButton(
                                   padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(),
-                                  icon: const Icon(Icons.close, color: Colors.red, size: 20),
+                                  constraints:
+                                      const BoxConstraints(),
+                                  icon: const Icon(Icons.close,
+                                      color: Colors.red, size: 20),
                                   onPressed: () async {
-                                    final confirm = await showDialog<bool>(
+                                    final confirm =
+                                        await showDialog<bool>(
                                       context: context,
-                                      builder: (context) => AlertDialog(
-                                        backgroundColor: const Color(0xff1f2937),
-                                        title: const Text("Delete Account", style: TextStyle(color: Colors.white)),
-                                        content: const Text("Are you sure?", style: TextStyle(color: Color(0xffe5e7eb))),
+                                      builder: (context) =>
+                                          AlertDialog(
+                                        backgroundColor:
+                                            const Color(0xff1f2937),
+                                        title: const Text(
+                                            "Delete Account",
+                                            style: TextStyle(
+                                                color: Colors.white)),
+                                        content: const Text(
+                                            "Are you sure?",
+                                            style: TextStyle(
+                                                color: Color(
+                                                    0xffe5e7eb))),
                                         actions: [
                                           TextButton(
-                                            onPressed: () => Navigator.pop(context, false),
-                                            child: const Text("Cancel", style: TextStyle(color: Color(0xff94a3b8))),
+                                            onPressed: () =>
+                                                Navigator.pop(
+                                                    context, false),
+                                            child: const Text(
+                                                "Cancel",
+                                                style: TextStyle(
+                                                    color: Color(
+                                                        0xff94a3b8))),
                                           ),
                                           TextButton(
-                                            onPressed: () => Navigator.pop(context, true),
-                                            child: const Text("Delete", style: TextStyle(color: Colors.redAccent)),
+                                            onPressed: () =>
+                                                Navigator.pop(
+                                                    context, true),
+                                            child: const Text(
+                                                "Delete",
+                                                style: TextStyle(
+                                                    color: Colors
+                                                        .redAccent)),
                                           ),
                                         ],
                                       ),
                                     );
 
                                     if (confirm == true) {
-                                      setState(() => _accounts.removeAt(index));
+                                      setState(() =>
+                                          _accounts.removeAt(index));
                                       _saveData();
-                                      _addLog("System", "Account deleted");
+                                      _addLog(
+                                          "System", "Account deleted");
                                     }
                                   },
                                 )
                               ],
                             ),
                             const SizedBox(height: 8),
-                            Text("Password: ${acc['password']}", style: const TextStyle(color: Color(0xff94a3b8), fontSize: 13)),
+                            Text(
+                              "Password: ${acc['password']}",
+                              style: const TextStyle(
+                                  color: Color(0xff94a3b8),
+                                  fontSize: 13),
+                            ),
                             const SizedBox(height: 4),
                             Text(
                               "Cookies: ${acc['auth_code']?.isEmpty == true ? 'None' : '${acc['auth_code']!.substring(0, acc['auth_code']!.length < 30 ? acc['auth_code']!.length : 30)}...'}",
-                              style: const TextStyle(color: Color(0xff94a3b8), fontSize: 11),
+                              style: const TextStyle(
+                                  color: Color(0xff94a3b8),
+                                  fontSize: 11),
                             ),
                           ],
                         ),
@@ -1000,22 +1169,35 @@ class _MainScreenState extends State<MainScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text("FCM Device Token", style: TextStyle(color: Color(0xff94a3b8), fontSize: 12, fontWeight: FontWeight.bold)),
+                    const Text("FCM Device Token",
+                        style: TextStyle(
+                            color: Color(0xff94a3b8),
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold)),
                     InkWell(
                       onTap: () {
-                        Clipboard.setData(ClipboardData(text: _fcmToken));
+                        Clipboard.setData(
+                            ClipboardData(text: _fcmToken));
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text("Token copied to clipboard"), backgroundColor: Colors.green),
+                          const SnackBar(
+                            content:
+                                Text("Token copied to clipboard"),
+                            backgroundColor: Colors.green,
+                          ),
                         );
                       },
-                      child: const Icon(Icons.copy, size: 16, color: Color(0xff94a3b8)),
+                      child: const Icon(Icons.copy,
+                          size: 16, color: Color(0xff94a3b8)),
                     )
                   ],
                 ),
                 const SizedBox(height: 8),
                 Text(
                   _fcmToken,
-                  style: const TextStyle(color: Colors.white, fontSize: 12, fontFamily: 'monospace'),
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontFamily: 'monospace'),
                 ),
               ],
             ),
@@ -1051,7 +1233,10 @@ class _MainScreenState extends State<MainScreen> {
                 });
                 _saveData();
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Settings Saved"), backgroundColor: Colors.green)
+                  const SnackBar(
+                    content: Text("Settings Saved"),
+                    backgroundColor: Colors.green,
+                  ),
                 );
               },
               child: const Text("Save Settings"),
