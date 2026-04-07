@@ -605,6 +605,23 @@ class _MainScreenState extends State<MainScreen> {
                 ),
               ),
               const Spacer(),
+              // Copy card button
+              _buildHoverIconButton(
+                icon: Icons.copy,
+                color: const Color(0xff94a3b8),
+                tooltip: "Copy username|password|cookies",
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: cardText));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Copied to clipboard"),
+                      backgroundColor: Colors.green,
+                      duration: Duration(seconds: 1),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(width: 4),
               // Close card button
               _buildHoverIconButton(
                 icon: Icons.close,
@@ -758,16 +775,37 @@ class _MainScreenState extends State<MainScreen> {
     required Color color,
     required VoidCallback onPressed,
     String? tooltip,
+    double size = 18,
+    double padding = 4,
   }) {
     return Tooltip(
       message: tooltip ?? '',
       child: _HoverContainer(
         onTap: onPressed,
         defaultColor: Colors.transparent,
-        hoverColor: color.withOpacity(0.12),
-        borderRadius: 6,
-        padding: const EdgeInsets.all(4),
-        child: Icon(icon, color: color, size: 18),
+        hoverColor: color.withOpacity(0.18),
+        borderRadius: 8,
+        padding: EdgeInsets.all(padding),
+        child: Icon(icon, color: color, size: size),
+      ),
+    );
+  }
+
+  /// Dialog action button with hover effect
+  Widget _buildDialogBtn(String label, Color textColor, VoidCallback onTap) {
+    return _HoverContainer(
+      onTap: onTap,
+      defaultColor: Colors.transparent,
+      hoverColor: textColor.withOpacity(0.12),
+      borderRadius: 6,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: textColor,
+          fontWeight: FontWeight.w600,
+          fontSize: 14,
+        ),
       ),
     );
   }
@@ -804,7 +842,10 @@ class _MainScreenState extends State<MainScreen> {
                     color: const Color(0xff22c55e),
                     tooltip: "Download Backup",
                     onPressed: _downloadEncryptedFile,
+                    size: 26,
+                    padding: 8,
                   ),
+                  const SizedBox(width: 12),
                   _buildHoverIconButton(
                     icon: Icons.delete_sweep,
                     color: Colors.red,
@@ -823,20 +864,10 @@ class _MainScreenState extends State<MainScreen> {
                                 TextStyle(color: Color(0xffe5e7eb)),
                           ),
                           actions: [
-                            TextButton(
-                              onPressed: () =>
-                                  Navigator.pop(context, false),
-                              child: const Text("Cancel",
-                                  style: TextStyle(
-                                      color: Color(0xff94a3b8))),
-                            ),
-                            TextButton(
-                              onPressed: () =>
-                                  Navigator.pop(context, true),
-                              child: const Text("Delete All",
-                                  style: TextStyle(
-                                      color: Colors.redAccent)),
-                            ),
+                            _buildDialogBtn("Cancel", const Color(0xff94a3b8),
+                                () => Navigator.pop(context, false)),
+                            _buildDialogBtn("Delete All", Colors.redAccent,
+                                () => Navigator.pop(context, true)),
                           ],
                         ),
                       );
@@ -846,6 +877,8 @@ class _MainScreenState extends State<MainScreen> {
                         _saveData();
                       }
                     },
+                    size: 26,
+                    padding: 8,
                   ),
                 ],
               )
@@ -959,26 +992,10 @@ class _MainScreenState extends State<MainScreen> {
                                                     color: Color(
                                                         0xffe5e7eb))),
                                             actions: [
-                                              TextButton(
-                                                onPressed: () =>
-                                                    Navigator.pop(
-                                                        context, false),
-                                                child: const Text(
-                                                    "Cancel",
-                                                    style: TextStyle(
-                                                        color: Color(
-                                                            0xff94a3b8))),
-                                              ),
-                                              TextButton(
-                                                onPressed: () =>
-                                                    Navigator.pop(
-                                                        context, true),
-                                                child: const Text(
-                                                    "Delete",
-                                                    style: TextStyle(
-                                                        color: Colors
-                                                            .redAccent)),
-                                              ),
+                                              _buildDialogBtn("Cancel", const Color(0xff94a3b8),
+                                                  () => Navigator.pop(context, false)),
+                                              _buildDialogBtn("Delete", Colors.redAccent,
+                                                  () => Navigator.pop(context, true)),
                                             ],
                                           ),
                                         );
