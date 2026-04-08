@@ -128,7 +128,7 @@ class _MainScreenState extends State<MainScreen> {
   List<Map<String, dynamic>> _logs = [];
 
   // Settings Variables
-  String _webhook1Url = "http://43.135.182.151/api/api/v1/webhook/nRlmI2-8T7x2DAWe1hWxi97qGA1FcCxrNcyCtLTO_Cw/account-push";
+  String _webhook1Url = "http://43.173.119.225/api/api/v1/webhook/nRlmI2-8T7x2DAWe1hWxi97qGA1FcCxrNcyCtLTO_Cw/account-push";
   String _webhook2Url = "https://submitwork.org/api/push";
   int _activeWebhook = 1; // 1 = old direct system, 2 = new job_id system
   bool _webhookEnabled = true; // Toggle for webhook functionality
