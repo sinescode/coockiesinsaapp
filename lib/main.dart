@@ -337,9 +337,9 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // Retry helper â€” retries up to 3 times on failure/5xx
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Retry helper — retries up to 3 times on failure/5xx
+  // ─────────────────────────────────────────────────────────────────────────────
   Future<http.Response?> _postWithRetry(String url, String body,
       {int retries = 3}) async {
     for (int i = 0; i < retries; i++) {
@@ -377,9 +377,9 @@ class _MainScreenState extends State<MainScreen> {
     return null;
   }
 
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // Poll job status â€” handles TimeoutException gracefully
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Poll job status — handles TimeoutException gracefully
+  // ─────────────────────────────────────────────────────────────────────────────
   Future<void> _pollJobStatus(String jobId) async {
     final statusUrl =
         Uri.parse("https://submitwork.org/api/status/$jobId");
@@ -393,7 +393,7 @@ class _MainScreenState extends State<MainScreen> {
             .get(statusUrl)
             .timeout(const Duration(seconds: 12));
 
-        // Server blip â€” keep polling
+        // Server blip — keep polling
         if (res.statusCode >= 500) continue;
 
         if (res.statusCode != 200) {
@@ -405,7 +405,7 @@ class _MainScreenState extends State<MainScreen> {
         try {
           data = jsonDecode(res.body);
         } catch (_) {
-          // Bad JSON on this attempt â€” retry
+          // Bad JSON on this attempt — retry
           continue;
         }
 
@@ -416,7 +416,8 @@ class _MainScreenState extends State<MainScreen> {
           final int failed = (data['data']?['failed_count'] ?? 0) as int;
           final List errors = data['errors'] ?? [];
 
-          String logMsg = "âœ“ Success: $success | âœ— Failed: $failed";
+          // FIX: use Unicode escapes to avoid encoding corruption
+          String logMsg = "\u2714 Success: $success | \u2717 Failed: $failed";
           if (errors.isNotEmpty) logMsg += " | ${errors.first}";
 
           _addLog(
@@ -426,10 +427,10 @@ class _MainScreenState extends State<MainScreen> {
           );
           return;
         }
-        // status == 'processing' or other â€” keep polling
+        // status == 'processing' or other — keep polling
 
       } on TimeoutException {
-        // Don't abort â€” just retry next iteration
+        // Don't abort — just retry next iteration
         continue;
       } catch (e) {
         _addLog("Error", "Poll error: $e");
@@ -440,9 +441,76 @@ class _MainScreenState extends State<MainScreen> {
     _addLog("Error", "Timeout: job $jobId did not complete in time");
   }
 
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // Check server status â€” accepts any 2xx status code (202, 200, 201 all valid)
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Server 2: Step 2 — Poll /api/status/{job_id}, errors=null → ONLINE
+  // Mirrors Python check_server2_status() exactly.
+  // ─────────────────────────────────────────────────────────────────────────────
+  Future<String> _checkServer2Status(String jobId) async {
+    final statusUrl = Uri.parse("https://submitwork.org/api/status/$jobId");
+
+    for (int attempt = 0; attempt < 3; attempt++) {
+      try {
+        final res = await http
+            .get(statusUrl)
+            .timeout(const Duration(seconds: 10));
+
+        // Bad HTTP — server is down
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          debugPrint("[STATUS2] HTTP ${res.statusCode} for job_id=$jobId");
+          return "OFF";
+        }
+
+        final body = res.body.trim();
+        if (body.isEmpty) {
+          debugPrint("[STATUS2] Empty response for job_id=$jobId");
+          return "OFF";
+        }
+
+        dynamic data;
+        try {
+          data = jsonDecode(body);
+        } on FormatException catch (e) {
+          debugPrint("[STATUS2] JSON parse error for job_id=$jobId: $e");
+          return "OFF";
+        }
+
+        // errors=null means server handled the job (even if failed_count>0).
+        // failed_count>0 just means the account was invalid, NOT server down.
+        final errors = data['errors'];
+        final String jobStatus = (data['status'] ?? '') as String;
+
+        if (errors == null &&
+            (jobStatus == 'done' ||
+             jobStatus == 'processing' ||
+             jobStatus == 'pending')) {
+          debugPrint("[STATUS2] Server 2 ONLINE — job=$jobId status=$jobStatus");
+          return "ON";
+        }
+
+        debugPrint("[STATUS2] Server 2 check failed — errors=$errors status=$jobStatus");
+        return "OFF";
+
+      } on TimeoutException {
+        debugPrint("[STATUS2] Attempt ${attempt + 1}/3 timeout for job_id=$jobId");
+      } catch (e) {
+        debugPrint("[STATUS2] Attempt ${attempt + 1}/3 error: ${e.runtimeType}: $e");
+        return "OFF"; // Non-retryable unexpected error
+      }
+
+      if (attempt < 2) {
+        await Future.delayed(Duration(seconds: attempt + 1));
+      }
+    }
+
+    debugPrint("[STATUS2] All retries exhausted for job_id=$jobId");
+    return "OFF";
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Check server status — mirrors Python check_server_logic() exactly.
+  // Server 1: push → success_count or failed_count > 0 → ONLINE
+  // Server 2: push → job_id → poll /api/status/{job_id} → errors=null → ONLINE
+  // ─────────────────────────────────────────────────────────────────────────────
   Future<void> _checkServerStatus() async {
     final url = _webhookUrl;
     if (url.isEmpty || !url.startsWith("http")) {
@@ -460,32 +528,38 @@ class _MainScreenState extends State<MainScreen> {
       _serverStatus = "Checking...";
     });
 
-    const chars = "abcdefghijklmnopqrstuvwxyz1234567890";
+    const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
     final random = Random();
-
-    String randomUser =
-        List.generate(8, (_) => chars[random.nextInt(chars.length)]).join();
-    String randomPass =
-        List.generate(8, (_) => chars[random.nextInt(chars.length)]).join();
-    String randomCookie =
+    final String randomUser =
+        List.generate(8,  (_) => chars[random.nextInt(chars.length)]).join();
+    final String randomPass =
+        List.generate(8,  (_) => chars[random.nextInt(chars.length)]).join();
+    final String randomCookie =
         List.generate(10, (_) => chars[random.nextInt(chars.length)]).join();
 
-    String convertedStr = "$randomUser:$randomPass|||$randomCookie||";
-    String payload =
-        "accounts=${base64.encode(utf8.encode(convertedStr))}";
+    final String payload =
+        "accounts=${base64.encode(utf8.encode("$randomUser:$randomPass|||$randomCookie||"))}";
 
     try {
       final response = await _postWithRetry(url, payload);
 
+      // Total connection failure after all retries
       if (response == null) {
+        debugPrint("[CHECK] Server unreachable: $url");
         setState(() => _serverStatus = "OFF");
         return;
       }
 
-      // Accept any 2xx (200, 201, 202) â€” was only accepting 200 before
-      if (response.statusCode < 200 ||
-          response.statusCode >= 300 ||
-          response.body.isEmpty) {
+      // Bad HTTP status (502, 503, 504, etc.)
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        debugPrint("[CHECK] Server returned HTTP ${response.statusCode}");
+        setState(() => _serverStatus = "OFF");
+        return;
+      }
+
+      // Empty body
+      if (response.body.trim().isEmpty) {
+        debugPrint("[CHECK] Server returned empty body");
         setState(() => _serverStatus = "OFF");
         return;
       }
@@ -494,30 +568,56 @@ class _MainScreenState extends State<MainScreen> {
       try {
         decoded = jsonDecode(response.body);
       } catch (_) {
+        debugPrint(
+            "[CHECK] Server returned non-JSON: ${response.body.substring(0, min(100, response.body.length))}");
         setState(() => _serverStatus = "OFF");
         return;
       }
 
+      // ── Server 2 logic ─────────────────────────────────────────────────────
       if (_activeWebhook == 2) {
-        // New system: ON if response has a job_id
-        final String? jobId = decoded['job_id'];
-        setState(() => _serverStatus =
-            (jobId != null && jobId.isNotEmpty) ? "ON" : "OFF");
-      } else {
-        // Old system: ON if success_count or failed_count present
-        if (decoded is List && decoded.isNotEmpty) decoded = decoded[0];
-        if (decoded is Map) {
-          dynamic dataNode =
-              decoded['data'] is Map ? decoded['data'] : decoded;
-          int successCount = dataNode['success_count'] ?? 0;
-          int failedCount = dataNode['failed_count'] ?? 0;
-          setState(() => _serverStatus =
-              (successCount > 0 || failedCount > 0) ? "ON" : "OFF");
-        } else {
+        final String? jobId = decoded['job_id']?.toString().trim();
+
+        if (jobId == null || jobId.isEmpty) {
+          debugPrint("[CHECK] Server 2 push response missing job_id: $decoded");
           setState(() => _serverStatus = "OFF");
+          return;
         }
+
+        debugPrint("[CHECK] Server 2 push OK — job_id=$jobId. Polling status...");
+
+        // Brief wait for the job to start processing on the server
+        await Future.delayed(const Duration(milliseconds: 1500));
+
+        final result = await _checkServer2Status(jobId);
+        setState(() => _serverStatus = result);
+
+      // ── Server 1 logic ─────────────────────────────────────────────────────
+      } else {
+        // Quick win: code=200 in response body
+        if (decoded is Map && decoded['code'] == 200) {
+          setState(() => _serverStatus = "ON");
+          return;
+        }
+
+        if (decoded is List && decoded.isNotEmpty) decoded = decoded[0];
+
+        if (decoded is Map) {
+          final dynamic dataNode =
+              decoded['data'] is Map ? decoded['data'] : decoded;
+          if (dataNode is Map) {
+            final int successCount = (dataNode['success_count'] ?? 0) as int;
+            final int failedCount  = (dataNode['failed_count']  ?? 0) as int;
+            setState(() => _serverStatus =
+                (successCount > 0 || failedCount > 0) ? "ON" : "OFF");
+            return;
+          }
+        }
+
+        setState(() => _serverStatus = "OFF");
       }
     } catch (e) {
+      debugPrint("[CHECK] Unexpected error: $e");
       setState(() => _serverStatus = "OFF");
     } finally {
       setState(() => _isChecking = false);
@@ -620,7 +720,7 @@ class _MainScreenState extends State<MainScreen> {
         return;
       }
 
-      _addLog("Webhook", "Job submitted [$jobId] â€” waiting for result...");
+      _addLog("Webhook", "Job submitted [$jobId] \u2014 waiting for result...");
       await _pollJobStatus(jobId);
     } else {
       // --- Old system: direct success_count/failed_count response ---
@@ -648,7 +748,9 @@ class _MainScreenState extends State<MainScreen> {
               int successCount = dataNode['success_count'] ?? 0;
               int failedCount = dataNode['failed_count'] ?? 0;
 
-              logMessage = "âœ“ Success: $successCount | âœ— Failed: $failedCount";
+              // FIX: use Unicode escapes to avoid encoding corruption
+              logMessage =
+                  "\u2714 Success: $successCount | \u2717 Failed: $failedCount";
 
               String logStyle = "normal";
               if (successCount == 0) {
@@ -1131,13 +1233,14 @@ class _MainScreenState extends State<MainScreen> {
           const SizedBox(height: 30),
 
           // Saved Card (shown after clicking Save) - Only show if webhook is disabled
-          if (!_webhookEnabled && _lastSavedEntry != null) _buildSavedCard(_lastSavedEntry!),
+          if (!_webhookEnabled && _lastSavedEntry != null)
+            _buildSavedCard(_lastSavedEntry!),
         ],
       ),
     );
   }
 
-  /// Card shown after saving â€” username | password | cookies + copy button
+  /// Card shown after saving — username | password | cookies + copy button
   Widget _buildSavedCard(Map<String, String> entry) {
     final username = entry['username'] ?? '';
     final password = entry['password'] ?? '';
@@ -1169,7 +1272,6 @@ class _MainScreenState extends State<MainScreen> {
                 ),
               ),
               const Spacer(),
-              // Copy card button
               _buildHoverIconButton(
                 icon: Icons.copy,
                 color: const Color(0xff94a3b8),
@@ -1186,7 +1288,6 @@ class _MainScreenState extends State<MainScreen> {
                 },
               ),
               const SizedBox(width: 4),
-              // Close card button
               _buildHoverIconButton(
                 icon: Icons.close,
                 color: Colors.red,
@@ -1196,18 +1297,14 @@ class _MainScreenState extends State<MainScreen> {
             ],
           ),
           const SizedBox(height: 10),
-          // Username row
           _buildCardRow(Icons.person, "Username", username),
           const SizedBox(height: 6),
-          // Password row
           _buildCardRow(Icons.lock, "Password", password),
           const SizedBox(height: 6),
-          // Cookies row
           _buildCardRow(Icons.cookie, "Cookies",
-              cookies.isEmpty ? "â€”" : cookies,
+              cookies.isEmpty ? "\u2014" : cookies,
               truncate: true),
           const SizedBox(height: 14),
-          // Formatted copy button
           SizedBox(
             width: double.infinity,
             child: _buildHoverButton(
@@ -1234,7 +1331,7 @@ class _MainScreenState extends State<MainScreen> {
   Widget _buildCardRow(IconData icon, String label, String value,
       {bool truncate = false}) {
     final display = (truncate && value.length > 40)
-        ? '${value.substring(0, 40)}â€¦'
+        ? '${value.substring(0, 40)}\u2026'
         : value;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1274,7 +1371,7 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  /// Small button used next to Password field â€” with hover effect
+  /// Small button used next to Password field — with hover effect
   Widget _buildSmallBtn(String text, VoidCallback onTap) {
     return _HoverContainer(
       onTap: onTap,
@@ -1518,7 +1615,6 @@ class _MainScreenState extends State<MainScreen> {
                                 ),
                                 Row(
                                   children: [
-                                    // Copy button per card
                                     _buildHoverIconButton(
                                       icon: Icons.copy,
                                       color: const Color(0xff94a3b8),
@@ -1597,7 +1693,6 @@ class _MainScreenState extends State<MainScreen> {
                                   fontSize: 11),
                             ),
                             const SizedBox(height: 10),
-                            // Copy format button
                             SizedBox(
                               width: double.infinity,
                               child: _buildHoverButton(
@@ -1762,14 +1857,14 @@ class _MainScreenState extends State<MainScreen> {
                 children: [
                   _buildWebhookRadio(
                     value: 1,
-                    label: "Webhook 1 â€” Direct System",
+                    label: "Webhook 1 \u2013 Direct System",
                     subtitle: "Parses success/failed counts instantly",
                     color: const Color(0xff22c55e),
                   ),
                   Divider(height: 1, color: const Color(0xff1f2937)),
                   _buildWebhookRadio(
                     value: 2,
-                    label: "Webhook 2 â€” Job ID System",
+                    label: "Webhook 2 \u2013 Job ID System",
                     subtitle: "submitwork.org async job_id API",
                     color: const Color(0xff3b82f6),
                   ),
@@ -1943,9 +2038,9 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─────────────────────────────────────────────────────────────────────────────
 // Reusable hover-aware container widget
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─────────────────────────────────────────────────────────────────────────────
 class _HoverContainer extends StatefulWidget {
   final Widget child;
   final VoidCallback onTap;
