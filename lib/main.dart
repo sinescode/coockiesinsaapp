@@ -1704,6 +1704,8 @@ class _MainScreenState extends State<MainScreen> {
         .where((j) {
           final s = j['status'] ?? '';
           return s != 'done_ok' && s != 'done_fail' && s != 'error' && s != 'not_found';
+        })
+        .length;
 
     return Column(
       children: [
@@ -2050,19 +2052,23 @@ class _MainScreenState extends State<MainScreen> {
 
     switch (status) {
       case 'done_ok':
-        statusColor = const Color(0xff22c55e);
-        statusIcon = Icons.check_circle;
-        final int s = job['success'] ?? 0;
-        final int f = job['failed'] ?? 0;
-        statusLabel = "\u2714 $s | \u2717 $f";
-        break;
+        {
+          statusColor = const Color(0xff22c55e);
+          statusIcon = Icons.check_circle;
+          final int s = (job['success'] ?? 0) as int;
+          final int f = (job['failed'] ?? 0) as int;
+          statusLabel = "\u2714 $s | \u2717 $f";
+          break;
+        }
       case 'done_fail':
-        statusColor = Colors.redAccent;
-        statusIcon = Icons.cancel;
-        final int s = job['success'] ?? 0;
-        final int f = job['failed'] ?? 0;
-        statusLabel = "\u2714 $s | \u2717 $f";
-        break;
+        {
+          statusColor = Colors.redAccent;
+          statusIcon = Icons.cancel;
+          final int s = (job['success'] ?? 0) as int;
+          final int f = (job['failed'] ?? 0) as int;
+          statusLabel = "\u2714 $s | \u2717 $f";
+          break;
+        }
       case 'error':
         statusColor = Colors.redAccent;
         statusIcon = Icons.error_outline;
@@ -2083,11 +2089,16 @@ class _MainScreenState extends State<MainScreen> {
         statusIcon = Icons.hourglass_empty;
         statusLabel = "pending";
         break;
-      default: // staging
-        statusColor = const Color(0xff3b82f6);
-        statusIcon = Icons.schedule;
-        final int releaseIn = job['release_in_seconds'] ?? 0;
-        statusLabel = releaseIn > 0 ? "~${(releaseIn / 60).ceil()}m left" : "staging";
+      default:
+        {
+          // staging
+          statusColor = const Color(0xff3b82f6);
+          statusIcon = Icons.schedule;
+          final int releaseIn = (job['release_in_seconds'] ?? 0) as int;
+          statusLabel =
+              releaseIn > 0 ? "~${(releaseIn / 60).ceil()}m left" : "staging";
+          break;
+        }
     }
 
     final bool isDone = status == 'done_ok' || status == 'done_fail' ||
@@ -2515,6 +2526,57 @@ class _MainScreenState extends State<MainScreen> {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reusable hover-aware container widget
+// ─────────────────────────────────────────────────────────────────────────────
+class _HoverContainer extends StatefulWidget {
+  final Widget child;
+  final VoidCallback onTap;
+  final Color defaultColor;
+  final Color hoverColor;
+  final double borderRadius;
+  final EdgeInsetsGeometry padding;
+  final BoxBorder? border;
+
+  const _HoverContainer({
+    required this.child,
+    required this.onTap,
+    required this.defaultColor,
+    required this.hoverColor,
+    required this.borderRadius,
+    required this.padding,
+    this.border,
+  });
+
+  @override
+  State<_HoverContainer> createState() => _HoverContainerState();
+}
+
+class _HoverContainerState extends State<_HoverContainer> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: widget.padding,
+          decoration: BoxDecoration(
+            color: _hovered ? widget.hoverColor : widget.defaultColor,
+            borderRadius: BorderRadius.circular(widget.borderRadius),
+            border: widget.border,
+          ),
+          child: widget.child,
+        ),
       ),
     );
   }
