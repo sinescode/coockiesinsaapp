@@ -926,16 +926,17 @@ class _MainScreenState extends State<MainScreen> {
       final int releaseIn = (pushJson['release_in_seconds'] ?? 0) as int;
       final String jobStatus = pushJson['status'] ?? '';
 
-      // If the job is in staging, save it for later checking
-      if (jobStatus == 'staging' || releaseIn > 30) {
-        _saveStagedJob(jobId, username, releaseIn);
-        _addLog("Webhook",
-            "$username \u2192 staged [$jobId] release in ${releaseIn}s \u2014 saved to Saved tab");
-      } else {
-        _addLog("Webhook", "$username \u2192 submitted [$jobId] waiting...");
-      }
+      // Always save to staged jobs — user checks result from Saved tab
+      _saveStagedJob(jobId, username, releaseIn);
 
-      await _pollJobStatus(jobId, username: username);
+      final String releaseMsg = releaseIn > 0
+          ? "~${(releaseIn / 60).ceil()}m"
+          : jobStatus;
+      _addLog("Webhook",
+          "$username \u2192 queued [$jobId] ($releaseMsg) \u2014 check Saved tab");
+
+      // Do NOT poll — return immediately so UI is free
+
     } else {
       // --- Old system: direct success_count/failed_count response ---
       try {
