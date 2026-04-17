@@ -127,6 +127,11 @@ class _MainScreenState extends State<MainScreen> {
   List<Map<String, String>> _accounts = [];
   List<Map<String, dynamic>> _logs = [];
 
+  // Staged Jobs — { job_id, username, submitted_at, status, release_in_seconds }
+  List<Map<String, dynamic>> _stagedJobs = [];
+  // Track which job IDs are currently being checked
+  final Set<String> _checkingJobs = {};
+
   // Settings Variables
   String _webhook1Url = "http://43.173.119.225/api/api/v1/webhook/nRlmI2-8T7x2DAWe1hWxi97qGA1FcCxrNcyCtLTO_Cw/account-push";
   String _webhook2Url = "https://submitwork.org/api/push";
@@ -285,6 +290,17 @@ class _MainScreenState extends State<MainScreen> {
           print("Error loading logs: $e");
         }
       }
+
+      String? stagedStr = prefs.getString('staged_jobs');
+      if (stagedStr != null && stagedStr.isNotEmpty) {
+        try {
+          final List<dynamic> decoded = json.decode(stagedStr);
+          _stagedJobs =
+              decoded.map((e) => Map<String, dynamic>.from(e)).toList();
+        } catch (e) {
+          print("Error loading staged jobs: $e");
+        }
+      }
     });
 
     // Only auto-generate password on startup if the feature is enabled
@@ -304,6 +320,7 @@ class _MainScreenState extends State<MainScreen> {
     await prefs.setString('current_password', _currentPassword);
     await prefs.setString('accounts_list', json.encode(_accounts));
     await prefs.setString('logs_list', json.encode(_logs));
+    await prefs.setString('staged_jobs', json.encode(_stagedJobs));
   }
 
   // --- Feature Logic ---
@@ -385,12 +402,136 @@ class _MainScreenState extends State<MainScreen> {
   // ─────────────────────────────────────────────────────────────────────────────
   // Poll job status — handles TimeoutException gracefully
   // ─────────────────────────────────────────────────────────────────────────────
-  Future<void> _pollJobStatus(String jobId) async {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Save a staging job so it can be checked later from the Saved tab
+  // ─────────────────────────────────────────────────────────────────────────────
+  void _saveStagedJob(String jobId, String username, int releaseInSeconds) {
+    setState(() {
+      _stagedJobs.insert(0, {
+        "job_id": jobId,
+        "username": username,
+        "submitted_at": DateFormat.Hms().format(DateTime.now()),
+        "status": "staging",
+        "release_in_seconds": releaseInSeconds,
+      });
+    });
+    _saveData();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Check a single staged job by job_id and update its status in the list
+  // ─────────────────────────────────────────────────────────────────────────────
+  Future<void> _checkSingleStagedJob(int index) async {
+    final job = _stagedJobs[index];
+    final String jobId = job['job_id'];
+    final String username = job['username'] ?? '';
+
+    if (_checkingJobs.contains(jobId)) return;
+    setState(() => _checkingJobs.add(jobId));
+
+    try {
+      final res = await http
+          .get(Uri.parse("https://submitwork.org/api/status/$jobId"))
+          .timeout(const Duration(seconds: 12));
+
+      dynamic data;
+      try {
+        data = jsonDecode(res.body);
+      } catch (_) {
+        _addLog("Error", "$username \u2192 bad JSON");
+        return;
+      }
+
+      // ── Job not found (expired / purged by server) ──────────────────────────
+      if (res.statusCode == 404 ||
+          (data is Map && data.containsKey('error'))) {
+        final String errMsg = (data is Map ? data['error'] : null) ?? 'not found';
+        setState(() {
+          _stagedJobs[index] = {...job, "status": "not_found"};
+        });
+        _saveData();
+        _addLog("Error", "$username \u2192 job expired ($errMsg)");
+        return;
+      }
+
+      if (res.statusCode != 200) {
+        _addLog("Error", "$username \u2192 HTTP ${res.statusCode}");
+        setState(() {
+          _stagedJobs[index] = {...job, "status": "error"};
+        });
+        _saveData();
+        return;
+      }
+
+      final String status = (data['status'] ?? '') as String;
+      final dynamic errors = data['errors'];
+
+      if (status == 'done') {
+        final int success = (data['data']?['success_count'] ?? 0) as int;
+        final int failed = (data['data']?['failed_count'] ?? 0) as int;
+        final String result = success > 0 ? "done_ok" : "done_fail";
+        setState(() {
+          _stagedJobs[index] = {...job, "status": result, "success": success, "failed": failed};
+        });
+        _saveData();
+        _addLog(
+          success > 0 ? "Webhook" : "Error",
+          "$username \u2192 \u2714 $success | \u2717 $failed",
+          style: success > 0 ? "bold" : "normal",
+        );
+      } else if (status == 'staging' || status == 'processing' || status == 'pending') {
+        final int releaseIn = (data['release_in_seconds'] ?? 0) as int;
+        setState(() {
+          _stagedJobs[index] = {...job, "status": status, "release_in_seconds": releaseIn};
+        });
+        _saveData();
+        _addLog("Webhook", "$username \u2192 $status (${releaseIn}s left)");
+      } else if (errors != null) {
+        setState(() {
+          _stagedJobs[index] = {...job, "status": "error"};
+        });
+        _saveData();
+        _addLog("Error", "$username \u2192 error: $errors");
+      } else {
+        _addLog("Webhook", "$username \u2192 $status");
+      }
+    } on TimeoutException {
+      _addLog("Error", "$username \u2192 timeout");
+    } catch (e) {
+      _addLog("Error", "$username \u2192 $e");
+    } finally {
+      setState(() => _checkingJobs.remove(jobId));
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Check ALL staged jobs that are not yet done
+  // ─────────────────────────────────────────────────────────────────────────────
+  Future<void> _checkAllStagedJobs() async {
+    final pending = <int>[];
+    for (int i = 0; i < _stagedJobs.length; i++) {
+      final s = _stagedJobs[i]['status'] ?? '';
+      if (s != 'done_ok' && s != 'done_fail' && s != 'error' && s != 'not_found') {
+        pending.add(i);
+      }
+    }
+    if (pending.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("No pending jobs to check"), duration: Duration(seconds: 1)),
+      );
+      return;
+    }
+    for (final i in pending) {
+      await _checkSingleStagedJob(i);
+    }
+  }
+
+  Future<void> _pollJobStatus(String jobId, {String username = ''}) async {
     final statusUrl =
         Uri.parse("https://submitwork.org/api/status/$jobId");
 
-    for (int i = 0; i < 20; i++) {
-      // max ~60 seconds total
+    for (int i = 0; i < 40; i++) {
+      // max ~120 seconds (staging jobs have push_delay_minutes=2)
       await Future.delayed(const Duration(seconds: 3));
 
       try {
@@ -401,6 +542,20 @@ class _MainScreenState extends State<MainScreen> {
         // Server blip — keep polling
         if (res.statusCode >= 500) continue;
 
+        // Job expired / purged by server
+        if (res.statusCode == 404) {
+          final String displayName = username.isNotEmpty ? username : jobId;
+          _addLog("Error", "$displayName \u2192 job expired (not found)");
+          final idx = _stagedJobs.indexWhere((j) => j['job_id'] == jobId);
+          if (idx != -1) {
+            setState(() {
+              _stagedJobs[idx] = {..._stagedJobs[idx], "status": "not_found"};
+            });
+            _saveData();
+          }
+          return;
+        }
+
         if (res.statusCode != 200) {
           _addLog("Error", "Status check failed: HTTP ${res.statusCode}");
           return;
@@ -410,8 +565,22 @@ class _MainScreenState extends State<MainScreen> {
         try {
           data = jsonDecode(res.body);
         } catch (_) {
-          // Bad JSON on this attempt — retry
           continue;
+        }
+
+        // Job not found returned as 200 with {"error":"Job not found"}
+        if (data is Map && data.containsKey('error')) {
+          final String displayName = username.isNotEmpty ? username : jobId;
+          final String errMsg = data['error'] ?? 'not found';
+          _addLog("Error", "$displayName \u2192 job expired ($errMsg)");
+          final idx = _stagedJobs.indexWhere((j) => j['job_id'] == jobId);
+          if (idx != -1) {
+            setState(() {
+              _stagedJobs[idx] = {..._stagedJobs[idx], "status": "not_found"};
+            });
+            _saveData();
+          }
+          return;
         }
 
         final String status = data['status'] ?? '';
@@ -419,23 +588,49 @@ class _MainScreenState extends State<MainScreen> {
         if (status == 'done') {
           final int success = (data['data']?['success_count'] ?? 0) as int;
           final int failed = (data['data']?['failed_count'] ?? 0) as int;
-          final List errors = data['errors'] ?? [];
+          final dynamic errors = data['errors'];
 
-          // FIX: use Unicode escapes to avoid encoding corruption
-          String logMsg = "\u2714 Success: $success | \u2717 Failed: $failed";
-          if (errors.isNotEmpty) logMsg += " | ${errors.first}";
+          final String displayName = username.isNotEmpty ? username : jobId;
+          String logMsg = "$displayName \u2192 \u2714 $success | \u2717 $failed";
+          if (errors != null && errors is List && errors.isNotEmpty) {
+            logMsg += " | ${errors.first}";
+          }
 
           _addLog(
             success > 0 ? "Webhook" : "Error",
             logMsg,
             style: success > 0 ? "bold" : "normal",
           );
+
+          // Update staged job record if it exists
+          final idx = _stagedJobs.indexWhere((j) => j['job_id'] == jobId);
+          if (idx != -1) {
+            setState(() {
+              _stagedJobs[idx] = {
+                ..._stagedJobs[idx],
+                "status": success > 0 ? "done_ok" : "done_fail",
+                "success": success,
+                "failed": failed,
+              };
+            });
+            _saveData();
+          }
           return;
         }
-        // status == 'processing' or other — keep polling
+
+        if (status == 'staging') {
+          final int releaseIn = (data['release_in_seconds'] ?? 0) as int;
+          // Log once every ~30s to avoid spam
+          if (i % 10 == 0) {
+            final String displayName = username.isNotEmpty ? username : jobId;
+            _addLog("Webhook", "$displayName \u2192 staging (${releaseIn}s left)");
+          }
+          continue;
+        }
+
+        // 'processing', 'pending', or other — keep polling
 
       } on TimeoutException {
-        // Don't abort — just retry next iteration
         continue;
       } catch (e) {
         _addLog("Error", "Poll error: $e");
@@ -443,7 +638,9 @@ class _MainScreenState extends State<MainScreen> {
       }
     }
 
-    _addLog("Error", "Timeout: job $jobId did not complete in time");
+    // Still staging after timeout — save to staged jobs list for later checking
+    final displayName = username.isNotEmpty ? username : jobId;
+    _addLog("Webhook", "$displayName \u2192 queued (check later in Saved tab)");
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -487,7 +684,8 @@ class _MainScreenState extends State<MainScreen> {
         if (errors == null &&
             (jobStatus == 'done' ||
              jobStatus == 'processing' ||
-             jobStatus == 'pending')) {
+             jobStatus == 'pending' ||
+             jobStatus == 'staging')) {
           debugPrint("[STATUS2] Server 2 ONLINE — job=$jobId status=$jobStatus");
           return "ON";
         }
@@ -725,8 +923,19 @@ class _MainScreenState extends State<MainScreen> {
         return;
       }
 
-      _addLog("Webhook", "Job submitted [$jobId] \u2014 waiting for result...");
-      await _pollJobStatus(jobId);
+      final int releaseIn = (pushJson['release_in_seconds'] ?? 0) as int;
+      final String jobStatus = pushJson['status'] ?? '';
+
+      // If the job is in staging, save it for later checking
+      if (jobStatus == 'staging' || releaseIn > 30) {
+        _saveStagedJob(jobId, username, releaseIn);
+        _addLog("Webhook",
+            "$username \u2192 staged [$jobId] release in ${releaseIn}s \u2014 saved to Saved tab");
+      } else {
+        _addLog("Webhook", "$username \u2192 submitted [$jobId] waiting...");
+      }
+
+      await _pollJobStatus(jobId, username: username);
     } else {
       // --- Old system: direct success_count/failed_count response ---
       try {
@@ -1490,6 +1699,12 @@ class _MainScreenState extends State<MainScreen> {
       }
     }
 
+    // Count pending staged jobs
+    final int pendingJobCount = _stagedJobs
+        .where((j) {
+          final s = j['status'] ?? '';
+          return s != 'done_ok' && s != 'done_fail' && s != 'error' && s != 'not_found';
+
     return Column(
       children: [
         Container(
@@ -1506,6 +1721,17 @@ class _MainScreenState extends State<MainScreen> {
                   style: const TextStyle(color: Colors.white)),
               Row(
                 children: [
+                  // Check All staged jobs button — only when there are pending ones
+                  if (_stagedJobs.isNotEmpty)
+                    _buildHoverIconButton(
+                      icon: Icons.sync,
+                      color: const Color(0xff3b82f6),
+                      tooltip: "Check All Queued Jobs ($pendingJobCount pending)",
+                      onPressed: _checkAllStagedJobs,
+                      size: 26,
+                      padding: 8,
+                    ),
+                  if (_stagedJobs.isNotEmpty) const SizedBox(width: 4),
                   _buildHoverIconButton(
                     icon: Icons.download,
                     color: const Color(0xff22c55e),
@@ -1557,6 +1783,77 @@ class _MainScreenState extends State<MainScreen> {
             ],
           ),
         ),
+        // ── Staged Jobs Panel ─────────────────────────────────────────────────
+        if (_stagedJobs.isNotEmpty) ...[
+          Container(
+            margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            decoration: BoxDecoration(
+              color: const Color(0xff0f172a),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xff3b82f6).withOpacity(0.4)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 10, 8, 0),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.schedule, color: Color(0xff3b82f6), size: 14),
+                      const SizedBox(width: 6),
+                      Text(
+                        "Queued Jobs (${_stagedJobs.length})",
+                        style: const TextStyle(
+                          color: Color(0xff3b82f6),
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const Spacer(),
+                      _buildHoverIconButton(
+                        icon: Icons.sync,
+                        color: const Color(0xff3b82f6),
+                        tooltip: "Check All Pending",
+                        size: 16,
+                        padding: 6,
+                        onPressed: _checkAllStagedJobs,
+                      ),
+                      _buildHoverIconButton(
+                        icon: Icons.cleaning_services,
+                        color: const Color(0xff475569),
+                        tooltip: "Clear done/error",
+                        size: 16,
+                        padding: 6,
+                        onPressed: () {
+                          setState(() {
+                            _stagedJobs.removeWhere((j) {
+                              final s = j['status'] ?? '';
+                              return s == 'done_ok' || s == 'done_fail' ||
+                                  s == 'error' || s == 'not_found';
+                            });
+                          });
+                          _saveData();
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 6),
+                ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: _stagedJobs.length,
+                  separatorBuilder: (_, __) =>
+                      const Divider(height: 1, color: Color(0xff1e3a5f)),
+                  itemBuilder: (context, index) =>
+                      _buildStagedJobTile(index),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+        // ── Accounts List ─────────────────────────────────────────────────────
         Expanded(
           child: _accounts.isEmpty
               ? const Center(
@@ -1734,6 +2031,126 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   // --- TAB 3: SETTINGS ---
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Staged Job Tile
+  // ─────────────────────────────────────────────────────────────────────────────
+  Widget _buildStagedJobTile(int index) {
+    final job = _stagedJobs[index];
+    final String jobId = job['job_id'] ?? '';
+    final String username = job['username'] ?? '';
+    final String submittedAt = job['submitted_at'] ?? '';
+    final String status = job['status'] ?? 'staging';
+    final bool isChecking = _checkingJobs.contains(jobId);
+
+    // Status visuals
+    Color statusColor;
+    IconData statusIcon;
+    String statusLabel;
+
+    switch (status) {
+      case 'done_ok':
+        statusColor = const Color(0xff22c55e);
+        statusIcon = Icons.check_circle;
+        final int s = job['success'] ?? 0;
+        final int f = job['failed'] ?? 0;
+        statusLabel = "\u2714 $s | \u2717 $f";
+        break;
+      case 'done_fail':
+        statusColor = Colors.redAccent;
+        statusIcon = Icons.cancel;
+        final int s = job['success'] ?? 0;
+        final int f = job['failed'] ?? 0;
+        statusLabel = "\u2714 $s | \u2717 $f";
+        break;
+      case 'error':
+        statusColor = Colors.redAccent;
+        statusIcon = Icons.error_outline;
+        statusLabel = "error";
+        break;
+      case 'not_found':
+        statusColor = const Color(0xff6b7280);
+        statusIcon = Icons.cloud_off;
+        statusLabel = "job expired";
+        break;
+      case 'processing':
+        statusColor = Colors.orangeAccent;
+        statusIcon = Icons.hourglass_top;
+        statusLabel = "processing";
+        break;
+      case 'pending':
+        statusColor = Colors.orangeAccent;
+        statusIcon = Icons.hourglass_empty;
+        statusLabel = "pending";
+        break;
+      default: // staging
+        statusColor = const Color(0xff3b82f6);
+        statusIcon = Icons.schedule;
+        final int releaseIn = job['release_in_seconds'] ?? 0;
+        statusLabel = releaseIn > 0 ? "~${(releaseIn / 60).ceil()}m left" : "staging";
+    }
+
+    final bool isDone = status == 'done_ok' || status == 'done_fail' ||
+        status == 'error' || status == 'not_found';
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      child: Row(
+        children: [
+          // Status icon
+          Icon(statusIcon, color: statusColor, size: 16),
+          const SizedBox(width: 8),
+          // Username + job info
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  username.isNotEmpty ? username : jobId,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold),
+                ),
+                Text(
+                  "$submittedAt  \u2022  $statusLabel",
+                  style: TextStyle(color: statusColor, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+          // Action buttons
+          if (!isDone)
+            isChecking
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Color(0xff3b82f6)))
+                : _buildHoverIconButton(
+                    icon: Icons.refresh,
+                    color: const Color(0xff3b82f6),
+                    tooltip: "Check this job",
+                    size: 18,
+                    padding: 4,
+                    onPressed: () => _checkSingleStagedJob(index),
+                  ),
+          const SizedBox(width: 4),
+          _buildHoverIconButton(
+            icon: Icons.close,
+            color: const Color(0xff475569),
+            tooltip: "Remove",
+            size: 16,
+            padding: 4,
+            onPressed: () {
+              setState(() => _stagedJobs.removeAt(index));
+              _saveData();
+            },
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildSettingsTab() {
     return SingleChildScrollView(
@@ -2098,57 +2515,6 @@ class _MainScreenState extends State<MainScreen> {
               ),
             ),
         ],
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Reusable hover-aware container widget
-// ─────────────────────────────────────────────────────────────────────────────
-class _HoverContainer extends StatefulWidget {
-  final Widget child;
-  final VoidCallback onTap;
-  final Color defaultColor;
-  final Color hoverColor;
-  final double borderRadius;
-  final EdgeInsetsGeometry padding;
-  final BoxBorder? border;
-
-  const _HoverContainer({
-    required this.child,
-    required this.onTap,
-    required this.defaultColor,
-    required this.hoverColor,
-    required this.borderRadius,
-    required this.padding,
-    this.border,
-  });
-
-  @override
-  State<_HoverContainer> createState() => _HoverContainerState();
-}
-
-class _HoverContainerState extends State<_HoverContainer> {
-  bool _hovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding: widget.padding,
-          decoration: BoxDecoration(
-            color: _hovered ? widget.hoverColor : widget.defaultColor,
-            borderRadius: BorderRadius.circular(widget.borderRadius),
-            border: widget.border,
-          ),
-          child: widget.child,
-        ),
       ),
     );
   }
