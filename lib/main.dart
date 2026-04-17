@@ -132,6 +132,7 @@ class _MainScreenState extends State<MainScreen> {
   String _webhook2Url = "https://submitwork.org/api/push";
   int _activeWebhook = 1; // 1 = old direct system, 2 = new job_id system
   bool _webhookEnabled = true; // Toggle for webhook functionality
+  bool _autoRandomPassword = true; // Toggle for auto random password
 
   String get _webhookUrl => _activeWebhook == 1 ? _webhook1Url : _webhook2Url;
 
@@ -243,6 +244,7 @@ class _MainScreenState extends State<MainScreen> {
     final savedWebhook2 = prefs.getString('webhook2_url');
     final savedActiveWebhook = prefs.getInt('active_webhook');
     final savedWebhookEnabled = prefs.getBool('webhook_enabled');
+    final savedAutoPassword = prefs.getBool('auto_random_password');
     final savedFilename = prefs.getString('json_filename');
     final savedPassword = prefs.getString('current_password');
     final savedToken = prefs.getString('fcm_token');
@@ -252,6 +254,7 @@ class _MainScreenState extends State<MainScreen> {
       if (savedWebhook2 != null) _webhook2Url = savedWebhook2;
       if (savedActiveWebhook != null) _activeWebhook = savedActiveWebhook;
       if (savedWebhookEnabled != null) _webhookEnabled = savedWebhookEnabled;
+      if (savedAutoPassword != null) _autoRandomPassword = savedAutoPassword;
       if (savedFilename != null) _jsonFilename = savedFilename;
       _currentPassword = savedPassword ?? "";
       if (savedToken != null) _fcmToken = savedToken;
@@ -284,7 +287,8 @@ class _MainScreenState extends State<MainScreen> {
       }
     });
 
-    if (_currentPassword.isEmpty) {
+    // Only auto-generate password on startup if the feature is enabled
+    if (_currentPassword.isEmpty && _autoRandomPassword) {
       _generatePassword();
     }
   }
@@ -295,6 +299,7 @@ class _MainScreenState extends State<MainScreen> {
     await prefs.setString('webhook2_url', _webhook2Url);
     await prefs.setInt('active_webhook', _activeWebhook);
     await prefs.setBool('webhook_enabled', _webhookEnabled);
+    await prefs.setBool('auto_random_password', _autoRandomPassword);
     await prefs.setString('json_filename', _jsonFilename);
     await prefs.setString('current_password', _currentPassword);
     await prefs.setString('accounts_list', json.encode(_accounts));
@@ -663,7 +668,7 @@ class _MainScreenState extends State<MainScreen> {
     if (!_webhookEnabled) {
       _usernameController.clear();
       _cookiesController.clear();
-      _generatePassword();
+      if (_autoRandomPassword) _generatePassword();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("Account saved successfully (Webhook OFF)"),
@@ -686,7 +691,7 @@ class _MainScreenState extends State<MainScreen> {
         _addLog("Error", "Server unreachable after 3 attempts");
         _usernameController.clear();
         _cookiesController.clear();
-        _generatePassword();
+        if (_autoRandomPassword) _generatePassword();
         return;
       }
 
@@ -694,7 +699,7 @@ class _MainScreenState extends State<MainScreen> {
         _addLog("Error", "(${pushResponse.statusCode}) Empty response");
         _usernameController.clear();
         _cookiesController.clear();
-        _generatePassword();
+        if (_autoRandomPassword) _generatePassword();
         return;
       }
 
@@ -706,7 +711,7 @@ class _MainScreenState extends State<MainScreen> {
             "(${pushResponse.statusCode}) Invalid JSON: ${pushResponse.body}");
         _usernameController.clear();
         _cookiesController.clear();
-        _generatePassword();
+        if (_autoRandomPassword) _generatePassword();
         return;
       }
 
@@ -716,7 +721,7 @@ class _MainScreenState extends State<MainScreen> {
         _addLog("Error", "(${pushResponse.statusCode}) $msg");
         _usernameController.clear();
         _cookiesController.clear();
-        _generatePassword();
+        if (_autoRandomPassword) _generatePassword();
         return;
       }
 
@@ -779,7 +784,7 @@ class _MainScreenState extends State<MainScreen> {
 
     _usernameController.clear();
     _cookiesController.clear();
-    _generatePassword();
+    if (_autoRandomPassword) _generatePassword();
   }
 
   // --- Save (formerly Submit) - for non-webhook mode ---
@@ -817,7 +822,7 @@ class _MainScreenState extends State<MainScreen> {
 
     _usernameController.clear();
     _cookiesController.clear();
-    _generatePassword();
+    if (_autoRandomPassword) _generatePassword();
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -1108,10 +1113,13 @@ class _MainScreenState extends State<MainScreen> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 5),
-                  _buildSmallBtn("Copy", _copyPassword),
-                  const SizedBox(width: 5),
-                  _buildSmallBtn("Change", _generatePassword),
+                  // Copy & Change buttons only shown when auto random password is ON
+                  if (_autoRandomPassword) ...[
+                    const SizedBox(width: 5),
+                    _buildSmallBtn("Copy", _copyPassword),
+                    const SizedBox(width: 5),
+                    _buildSmallBtn("Change", _generatePassword),
+                  ],
                 ],
               ),
             ],
@@ -1782,7 +1790,64 @@ class _MainScreenState extends State<MainScreen> {
           ),
           const SizedBox(height: 24),
 
-          // Webhook Toggle Switch
+          // ── Auto Random Password Toggle ──────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xff111827),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xff1f2937)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text("Auto Random Password",
+                          style: TextStyle(
+                              color: Color(0xff94a3b8),
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 4),
+                      Text(
+                        _autoRandomPassword
+                            ? "Copy & Change buttons shown in Home"
+                            : "Manual password entry — no auto buttons",
+                        style: const TextStyle(
+                            color: Color(0xff475569), fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: _autoRandomPassword,
+                  onChanged: (value) {
+                    setState(() {
+                      _autoRandomPassword = value;
+                    });
+                    _saveData();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          value
+                              ? "Auto password enabled"
+                              : "Auto password disabled — enter manually",
+                        ),
+                        backgroundColor:
+                            value ? Colors.green : Colors.orange,
+                      ),
+                    );
+                  },
+                  activeColor: const Color(0xff22c55e),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // ── Webhook Enabled Toggle ───────────────────────────────────────────
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
