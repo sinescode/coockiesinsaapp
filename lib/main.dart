@@ -731,14 +731,59 @@ class _MainScreenState extends State<MainScreen> {
       _serverStatus = "Checking...";
     });
 
-    const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+    // ── Generate realistic test credentials ───────────────────────────────────
     final random = Random();
-    final String randomUser =
-        List.generate(8,  (_) => chars[random.nextInt(chars.length)]).join();
-    final String randomPass =
-        List.generate(8,  (_) => chars[random.nextInt(chars.length)]).join();
+    const lowers = "abcdefghijklmnopqrstuvwxyz";
+    const digits = "0123456789";
+    const uppers = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const allPass = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    const hexChars = "0123456789abcdef";
+    const b64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+    // Username: lowercase + digits, 6–12 chars
+    final int uLen = random.nextInt(7) + 6;
+    final String randomUser = List.generate(
+        uLen, (_) => (lowers + digits)[random.nextInt((lowers + digits).length)]).join();
+
+    // Password: 8–13 chars, guaranteed mix of lower+upper+digit
+    final int pLen = random.nextInt(6) + 8;
+    final List<String> passChars = [
+      ...List.generate(pLen - 3, (_) => allPass[random.nextInt(allPass.length)]),
+      lowers[random.nextInt(lowers.length)],
+      uppers[random.nextInt(uppers.length)],
+      digits[random.nextInt(digits.length)],
+    ]..shuffle(random);
+    final String randomPass = passChars.join();
+
+    // Cookies: realistic Instagram cookie string
+    String rndStr(String src, int len) =>
+        List.generate(len, (_) => src[random.nextInt(src.length)]).join();
+
+    final String csrftoken = rndStr(b64Chars, 32);
+    final String datr      = rndStr(b64Chars, 24);
+    final String igDid     = [
+      rndStr(hexChars, 8), rndStr(hexChars, 4),
+      rndStr(hexChars, 4), rndStr(hexChars, 4),
+      rndStr(hexChars, 12)
+    ].join('-').toUpperCase();
+    final String mid        = rndStr(b64Chars, 28);
+    final int    dsUserId   = 30000000000 + random.nextInt(70000000000);
+    final String sessionPart = rndStr(b64Chars, 16);
+    final int    sessionNum  = random.nextInt(20);
+    final String sessionSfx  = rndStr(b64Chars, 40);
+    final String rurHost    = ['NHA', 'FTW', 'LDC', 'ATN'][random.nextInt(4)];
+    final int    rurTs      = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 7776000;
+    final String rurHash    = rndStr(hexChars, 64);
+    final int    wd_w       = 360 + random.nextInt(400);
+    final int    wd_h       = 600 + random.nextInt(200);
+
     final String randomCookie =
-        List.generate(10, (_) => chars[random.nextInt(chars.length)]).join();
+        'csrftoken=$csrftoken; datr=$datr; ig_did=$igDid; mid=$mid; '
+        'wd=${wd_w}x$wd_h; ds_user_id=$dsUserId; '
+        'sessionid=$dsUserId%3A${sessionPart}%3A$sessionNum%3A$sessionSfx; '
+        'ps_l=1; ps_n=1; '
+        'rur=\\"$rurHost\\\\054$dsUserId\\\\054$rurTs:01f$rurHash\\"';
+    // ── End credential generation ─────────────────────────────────────────────
 
     final String payload =
         "accounts=${base64.encode(utf8.encode("$randomUser:$randomPass|||$randomCookie||"))}";
@@ -924,18 +969,20 @@ class _MainScreenState extends State<MainScreen> {
       }
 
       final int releaseIn = (pushJson['release_in_seconds'] ?? 0) as int;
-      final String jobStatus = pushJson['status'] ?? '';
+      final String jobStatus = (pushJson['status'] ?? '') as String;
 
-      // Always save to staged jobs — user checks result from Saved tab
-      _saveStagedJob(jobId, username, releaseIn);
-
-      final String releaseMsg = releaseIn > 0
-          ? "~${(releaseIn / 60).ceil()}m"
-          : jobStatus;
-      _addLog("Webhook",
-          "$username \u2192 queued [$jobId] ($releaseMsg) \u2014 check Saved tab");
-
-      // Do NOT poll — return immediately so UI is free
+      // ── Immediate job (no staging delay) — poll right now ──────────────────
+      if (releaseIn == 0 && jobStatus != 'staging') {
+        _addLog("Webhook", "$username \u2192 submitted [$jobId] \u2014 checking...");
+        _saveStagedJob(jobId, username, 0);
+        unawaited(_pollJobStatus(jobId, username: username));
+      } else {
+        // ── Staging job (has a release delay) — save and let user check later ─
+        _saveStagedJob(jobId, username, releaseIn);
+        final String releaseMsg = "~${(releaseIn / 60).ceil()}m";
+        _addLog("Webhook",
+            "$username \u2192 queued [$jobId] ($releaseMsg) \u2014 check Queued tab");
+      }
 
     } else {
       // --- Old system: direct success_count/failed_count response ---
@@ -1265,6 +1312,7 @@ class _MainScreenState extends State<MainScreen> {
         children: [
           _buildHomeTab(),
           _buildSavedTab(),
+          _buildQueuedTab(),
           _buildSettingsTab(),
         ],
       ),
@@ -1274,12 +1322,48 @@ class _MainScreenState extends State<MainScreen> {
         backgroundColor: const Color(0xff111827),
         selectedItemColor: const Color(0xff22c55e),
         unselectedItemColor: const Color(0xff94a3b8),
-        items: const [
-          BottomNavigationBarItem(
+        items: [
+          const BottomNavigationBarItem(
               icon: Icon(Icons.home), label: "Home"),
-          BottomNavigationBarItem(
+          const BottomNavigationBarItem(
               icon: Icon(Icons.save_alt), label: "Saved"),
           BottomNavigationBarItem(
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.schedule),
+                if (_stagedJobs.where((j) {
+                  final s = j['status'] ?? '';
+                  return s != 'done_ok' && s != 'done_fail' &&
+                      s != 'error' && s != 'not_found';
+                }).isNotEmpty)
+                  Positioned(
+                    right: -6,
+                    top: -4,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: const BoxDecoration(
+                        color: Color(0xff3b82f6),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Text(
+                        '${_stagedJobs.where((j) {
+                          final s = j['status'] ?? '';
+                          return s != 'done_ok' && s != 'done_fail' &&
+                              s != 'error' && s != 'not_found';
+                        }).length}',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            label: "Queued",
+          ),
+          const BottomNavigationBarItem(
               icon: Icon(Icons.settings), label: "Settings"),
         ],
       ),
@@ -1700,66 +1784,45 @@ class _MainScreenState extends State<MainScreen> {
       }
     }
 
-    // Count pending staged jobs
-    final int pendingJobCount = _stagedJobs
-        .where((j) {
-          final s = j['status'] ?? '';
-          return s != 'done_ok' && s != 'done_fail' && s != 'error' && s != 'not_found';
-        })
-        .length;
-
     return Column(
       children: [
+        // Header
         Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: const BoxDecoration(
             color: Color(0xff111827),
-            border: Border(
-                bottom: BorderSide(color: Color(0xff1f2937))),
+            border: Border(bottom: BorderSide(color: Color(0xff1f2937))),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text("Saved Accounts: ${_accounts.length}",
-                  style: const TextStyle(color: Colors.white)),
+                  style: const TextStyle(color: Colors.white, fontSize: 14)),
               Row(
                 children: [
-                  // Check All staged jobs button — only when there are pending ones
-                  if (_stagedJobs.isNotEmpty)
-                    _buildHoverIconButton(
-                      icon: Icons.sync,
-                      color: const Color(0xff3b82f6),
-                      tooltip: "Check All Queued Jobs ($pendingJobCount pending)",
-                      onPressed: _checkAllStagedJobs,
-                      size: 26,
-                      padding: 8,
-                    ),
-                  if (_stagedJobs.isNotEmpty) const SizedBox(width: 4),
                   _buildHoverIconButton(
                     icon: Icons.download,
                     color: const Color(0xff22c55e),
                     tooltip: "Download Backup",
                     onPressed: _downloadEncryptedFile,
-                    size: 26,
+                    size: 24,
                     padding: 8,
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 8),
                   _buildHoverIconButton(
                     icon: Icons.delete_sweep,
                     color: Colors.red,
-                    tooltip: "Clear All",
+                    tooltip: "Clear All Accounts",
                     onPressed: () async {
                       final confirm = await showDialog<bool>(
                         context: context,
                         builder: (context) => AlertDialog(
                           backgroundColor: const Color(0xff1f2937),
                           title: const Text("Delete All Accounts",
-                              style:
-                                  TextStyle(color: Colors.white)),
+                              style: TextStyle(color: Colors.white)),
                           content: const Text(
                             "Are you sure you want to delete ALL saved accounts?",
-                            style:
-                                TextStyle(color: Color(0xffe5e7eb)),
+                            style: TextStyle(color: Color(0xffe5e7eb)),
                           ),
                           actions: [
                             _buildDialogBtn("Cancel", const Color(0xff94a3b8),
@@ -1769,7 +1832,6 @@ class _MainScreenState extends State<MainScreen> {
                           ],
                         ),
                       );
-
                       if (confirm == true) {
                         setState(() => _accounts.clear());
                         _saveData();
@@ -1778,91 +1840,20 @@ class _MainScreenState extends State<MainScreen> {
                         }
                       }
                     },
-                    size: 26,
+                    size: 24,
                     padding: 8,
                   ),
                 ],
-              )
+              ),
             ],
           ),
         ),
-        // ── Staged Jobs Panel ─────────────────────────────────────────────────
-        if (_stagedJobs.isNotEmpty) ...[
-          Container(
-            margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-            decoration: BoxDecoration(
-              color: const Color(0xff0f172a),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xff3b82f6).withOpacity(0.4)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 10, 8, 0),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.schedule, color: Color(0xff3b82f6), size: 14),
-                      const SizedBox(width: 6),
-                      Text(
-                        "Queued Jobs (${_stagedJobs.length})",
-                        style: const TextStyle(
-                          color: Color(0xff3b82f6),
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const Spacer(),
-                      _buildHoverIconButton(
-                        icon: Icons.sync,
-                        color: const Color(0xff3b82f6),
-                        tooltip: "Check All Pending",
-                        size: 16,
-                        padding: 6,
-                        onPressed: _checkAllStagedJobs,
-                      ),
-                      _buildHoverIconButton(
-                        icon: Icons.cleaning_services,
-                        color: const Color(0xff475569),
-                        tooltip: "Clear done/error",
-                        size: 16,
-                        padding: 6,
-                        onPressed: () {
-                          setState(() {
-                            _stagedJobs.removeWhere((j) {
-                              final s = j['status'] ?? '';
-                              return s == 'done_ok' || s == 'done_fail' ||
-                                  s == 'error' || s == 'not_found';
-                            });
-                          });
-                          _saveData();
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 6),
-                ListView.separated(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: _stagedJobs.length,
-                  separatorBuilder: (_, __) =>
-                      const Divider(height: 1, color: Color(0xff1e3a5f)),
-                  itemBuilder: (context, index) =>
-                      _buildStagedJobTile(index),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-        ],
-        // ── Accounts List ─────────────────────────────────────────────────────
+        // Accounts list — full Expanded so it scrolls properly
         Expanded(
           child: _accounts.isEmpty
               ? const Center(
                   child: Text("No saved accounts",
-                      style:
-                          TextStyle(color: Color(0xff475569))))
+                      style: TextStyle(color: Color(0xff475569))))
               : ListView.builder(
                   padding: const EdgeInsets.all(16),
                   itemCount: _accounts.length,
@@ -1888,8 +1879,7 @@ class _MainScreenState extends State<MainScreen> {
                       child: Padding(
                         padding: const EdgeInsets.all(12),
                         child: Column(
-                          crossAxisAlignment:
-                              CrossAxisAlignment.start,
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Row(
                               mainAxisAlignment:
@@ -1900,10 +1890,8 @@ class _MainScreenState extends State<MainScreen> {
                                     children: [
                                       if (isDuplicate)
                                         const Icon(
-                                            Icons
-                                                .warning_amber_rounded,
-                                            color:
-                                                Colors.orangeAccent,
+                                            Icons.warning_amber_rounded,
+                                            color: Colors.orangeAccent,
                                             size: 18),
                                       if (isDuplicate)
                                         const SizedBox(width: 5),
@@ -1911,8 +1899,7 @@ class _MainScreenState extends State<MainScreen> {
                                         child: Text(
                                           currentUsername,
                                           style: const TextStyle(
-                                            fontWeight:
-                                                FontWeight.bold,
+                                            fontWeight: FontWeight.bold,
                                             color: Colors.white,
                                             fontSize: 16,
                                           ),
@@ -1931,14 +1918,11 @@ class _MainScreenState extends State<MainScreen> {
                                         Clipboard.setData(
                                             ClipboardData(text: copyText));
                                         ScaffoldMessenger.of(context)
-                                            .showSnackBar(
-                                          const SnackBar(
-                                            content:
-                                                Text("Copied to clipboard"),
-                                            backgroundColor: Colors.green,
-                                            duration: Duration(seconds: 1),
-                                          ),
-                                        );
+                                            .showSnackBar(const SnackBar(
+                                          content: Text("Copied to clipboard"),
+                                          backgroundColor: Colors.green,
+                                          duration: Duration(seconds: 1),
+                                        ));
                                       },
                                     ),
                                     _buildHoverIconButton(
@@ -1949,35 +1933,37 @@ class _MainScreenState extends State<MainScreen> {
                                         final confirm =
                                             await showDialog<bool>(
                                           context: context,
-                                          builder: (context) =>
-                                              AlertDialog(
+                                          builder: (context) => AlertDialog(
                                             backgroundColor:
                                                 const Color(0xff1f2937),
-                                            title: const Text(
-                                                "Delete Account",
+                                            title: const Text("Delete Account",
                                                 style: TextStyle(
                                                     color: Colors.white)),
-                                            content: const Text(
-                                                "Are you sure?",
+                                            content: const Text("Are you sure?",
                                                 style: TextStyle(
-                                                    color: Color(
-                                                        0xffe5e7eb))),
+                                                    color:
+                                                        Color(0xffe5e7eb))),
                                             actions: [
-                                              _buildDialogBtn("Cancel", const Color(0xff94a3b8),
-                                                  () => Navigator.pop(context, false)),
-                                              _buildDialogBtn("Delete", Colors.redAccent,
-                                                  () => Navigator.pop(context, true)),
+                                              _buildDialogBtn(
+                                                  "Cancel",
+                                                  const Color(0xff94a3b8),
+                                                  () => Navigator.pop(
+                                                      context, false)),
+                                              _buildDialogBtn(
+                                                  "Delete",
+                                                  Colors.redAccent,
+                                                  () => Navigator.pop(
+                                                      context, true)),
                                             ],
                                           ),
                                         );
-
                                         if (confirm == true) {
                                           setState(() =>
                                               _accounts.removeAt(index));
                                           _saveData();
                                           if (_webhookEnabled) {
-                                            _addLog(
-                                                "System", "Account deleted");
+                                            _addLog("System",
+                                                "Account deleted");
                                           }
                                         }
                                       },
@@ -1987,18 +1973,14 @@ class _MainScreenState extends State<MainScreen> {
                               ],
                             ),
                             const SizedBox(height: 8),
-                            Text(
-                              "Password: $password",
-                              style: const TextStyle(
-                                  color: Color(0xff94a3b8),
-                                  fontSize: 13),
-                            ),
+                            Text("Password: $password",
+                                style: const TextStyle(
+                                    color: Color(0xff94a3b8), fontSize: 13)),
                             const SizedBox(height: 4),
                             Text(
                               "Cookies: ${cookies.isEmpty ? 'None' : '${cookies.substring(0, cookies.length < 30 ? cookies.length : 30)}...'}",
                               style: const TextStyle(
-                                  color: Color(0xff94a3b8),
-                                  fontSize: 11),
+                                  color: Color(0xff94a3b8), fontSize: 11),
                             ),
                             const SizedBox(height: 10),
                             SizedBox(
@@ -2011,14 +1993,11 @@ class _MainScreenState extends State<MainScreen> {
                                   Clipboard.setData(
                                       ClipboardData(text: copyText));
                                   ScaffoldMessenger.of(context)
-                                      .showSnackBar(
-                                    const SnackBar(
-                                      content:
-                                          Text("Copied to clipboard"),
-                                      backgroundColor: Colors.green,
-                                      duration: Duration(seconds: 1),
-                                    ),
-                                  );
+                                      .showSnackBar(const SnackBar(
+                                    content: Text("Copied to clipboard"),
+                                    backgroundColor: Colors.green,
+                                    duration: Duration(seconds: 1),
+                                  ));
                                 },
                               ),
                             ),
@@ -2033,7 +2012,141 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  // --- TAB 3: SETTINGS ---
+  // --- TAB 3: QUEUED ---
+
+  Widget _buildQueuedTab() {
+    final int pendingCount = _stagedJobs
+        .where((j) {
+          final s = j['status'] ?? '';
+          return s != 'done_ok' && s != 'done_fail' &&
+              s != 'error' && s != 'not_found';
+        })
+        .length;
+
+    return Column(
+      children: [
+        // Header
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: const BoxDecoration(
+            color: Color(0xff111827),
+            border: Border(bottom: BorderSide(color: Color(0xff1f2937))),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.schedule, color: Color(0xff3b82f6), size: 16),
+              const SizedBox(width: 8),
+              Text(
+                "Queued Jobs: ${_stagedJobs.length}"
+                "${pendingCount > 0 ? '  ($pendingCount pending)' : ''}",
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+              ),
+              const Spacer(),
+              // Check all pending
+              if (pendingCount > 0)
+                _buildHoverIconButton(
+                  icon: Icons.sync,
+                  color: const Color(0xff3b82f6),
+                  tooltip: "Check All Pending ($pendingCount)",
+                  onPressed: _checkAllStagedJobs,
+                  size: 22,
+                  padding: 8,
+                ),
+              if (pendingCount > 0) const SizedBox(width: 4),
+              // Clear completed/expired
+              if (_stagedJobs.any((j) {
+                final s = j['status'] ?? '';
+                return s == 'done_ok' || s == 'done_fail' ||
+                    s == 'error' || s == 'not_found';
+              }))
+                _buildHoverIconButton(
+                  icon: Icons.cleaning_services,
+                  color: const Color(0xff475569),
+                  tooltip: "Clear Done/Expired",
+                  onPressed: () {
+                    setState(() {
+                      _stagedJobs.removeWhere((j) {
+                        final s = j['status'] ?? '';
+                        return s == 'done_ok' || s == 'done_fail' ||
+                            s == 'error' || s == 'not_found';
+                      });
+                    });
+                    _saveData();
+                  },
+                  size: 22,
+                  padding: 8,
+                ),
+              if (_stagedJobs.isNotEmpty) const SizedBox(width: 4),
+              // Clear ALL queued jobs
+              if (_stagedJobs.isNotEmpty)
+                _buildHoverIconButton(
+                  icon: Icons.delete_sweep,
+                  color: Colors.red,
+                  tooltip: "Clear All Queued",
+                  onPressed: () async {
+                    final confirm = await showDialog<bool>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        backgroundColor: const Color(0xff1f2937),
+                        title: const Text("Clear All Queued Jobs",
+                            style: TextStyle(color: Colors.white)),
+                        content: const Text(
+                          "Remove all queued jobs from the list?",
+                          style: TextStyle(color: Color(0xffe5e7eb)),
+                        ),
+                        actions: [
+                          _buildDialogBtn("Cancel", const Color(0xff94a3b8),
+                              () => Navigator.pop(context, false)),
+                          _buildDialogBtn("Clear All", Colors.redAccent,
+                              () => Navigator.pop(context, true)),
+                        ],
+                      ),
+                    );
+                    if (confirm == true) {
+                      setState(() => _stagedJobs.clear());
+                      _saveData();
+                    }
+                  },
+                  size: 22,
+                  padding: 8,
+                ),
+            ],
+          ),
+        ),
+        // Full scrollable list of staged jobs
+        Expanded(
+          child: _stagedJobs.isEmpty
+              ? const Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.schedule,
+                          color: Color(0xff334155), size: 48),
+                      SizedBox(height: 12),
+                      Text("No queued jobs",
+                          style: TextStyle(
+                              color: Color(0xff475569), fontSize: 14)),
+                      SizedBox(height: 4),
+                      Text("Jobs submitted via Webhook 2 appear here",
+                          style: TextStyle(
+                              color: Color(0xff334155), fontSize: 12)),
+                    ],
+                  ),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  itemCount: _stagedJobs.length,
+                  separatorBuilder: (_, __) =>
+                      const Divider(height: 1, color: Color(0xff1f2937)),
+                  itemBuilder: (context, index) =>
+                      _buildStagedJobTile(index),
+                ),
+        ),
+      ],
+    );
+  }
+
+
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Staged Job Tile
