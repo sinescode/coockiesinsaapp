@@ -400,10 +400,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Poll job status — handles TimeoutException gracefully
-  // ─────────────────────────────────────────────────────────────────────────────
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Save a staging job so it can be checked later from the Saved tab
+  // Save a staging job so it can be checked later from the Queued tab
   // ─────────────────────────────────────────────────────────────────────────────
   void _saveStagedJob(String jobId, String username, int releaseInSeconds) {
     setState(() {
@@ -644,9 +641,8 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // FIX: Server 2 status poll — retries on ANY non-terminal status instead of
-  // immediately returning "OFF". Handles "queued", "received", or any other
-  // transitional status the server may return. Polls up to 8 times (16s max).
+  // FIX: Server 2 status poll — retries on ANY non-terminal status.
+  // Polls up to 8 times (16s max). Handles queued/received/any transitional state.
   // ─────────────────────────────────────────────────────────────────────────────
   Future<String> _checkServer2Status(String jobId) async {
     final statusUrl = Uri.parse("https://submitwork.org/api/status/$jobId");
@@ -699,9 +695,6 @@ class _MainScreenState extends State<MainScreen> {
         }
 
         // ── Not ready yet OR unexpected status — wait 2s and retry ────────────
-        // This is the KEY FIX: the old code did `return "OFF"` here, which meant
-        // any status not in the list above (e.g. "queued", "received", or a job
-        // that hasn't started yet) would immediately report the server as OFF.
         debugPrint("[STATUS2] Not ready (status=$jobStatus errors=$errors), retrying in 2s...");
         await Future.delayed(const Duration(seconds: 2));
 
@@ -720,166 +713,178 @@ class _MainScreenState extends State<MainScreen> {
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Check server status
-  // Server 1: push → success_count or failed_count > 0 → ONLINE
-  // Server 2: push → job_id → poll /api/status/{job_id} → errors=null → ONLINE
+  // FIX 1: URL validation moved inside try so finally always clears _isChecking.
+  // FIX 2: Wrapped with 30s overall timeout so it never spins forever.
+  // FIX 3: rur cookie escape fixed (\\054 not \\\\054).
+  // FIX 4: dsUserId uses double multiplication to avoid nextInt overflow.
   // ─────────────────────────────────────────────────────────────────────────────
   Future<void> _checkServerStatus() async {
-    final url = _webhookUrl;
-    if (url.isEmpty || !url.startsWith("http")) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Please set a valid Webhook URL in Settings first."),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
     setState(() {
       _isChecking = true;
       _serverStatus = "Checking...";
     });
 
-    // ── Generate realistic test credentials ───────────────────────────────────
-    final random = Random();
-    const lowers   = "abcdefghijklmnopqrstuvwxyz";
-    const digits   = "0123456789";
-    const uppers   = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    const allPass  = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    const hexChars = "0123456789abcdef";
-    const b64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-
-    // Username: lowercase + digits, 6–12 chars
-    final int uLen = random.nextInt(7) + 6;
-    final String randomUser = List.generate(
-        uLen, (_) => (lowers + digits)[random.nextInt((lowers + digits).length)]).join();
-
-    // Password: 8–13 chars, guaranteed mix of lower+upper+digit
-    final int pLen = random.nextInt(6) + 8;
-    final List<String> passChars = [
-      ...List.generate(pLen - 3, (_) => allPass[random.nextInt(allPass.length)]),
-      lowers[random.nextInt(lowers.length)],
-      uppers[random.nextInt(uppers.length)],
-      digits[random.nextInt(digits.length)],
-    ]..shuffle(random);
-    final String randomPass = passChars.join();
-
-    // Cookies: realistic Instagram cookie string
-    String rndStr(String src, int len) =>
-        List.generate(len, (_) => src[random.nextInt(src.length)]).join();
-
-    final String csrftoken  = rndStr(b64Chars, 32);
-    final String datr       = rndStr(b64Chars, 24);
-    final String igDid      = [
-      rndStr(hexChars, 8), rndStr(hexChars, 4),
-      rndStr(hexChars, 4), rndStr(hexChars, 4),
-      rndStr(hexChars, 12)
-    ].join('-').toUpperCase();
-    final String mid         = rndStr(b64Chars, 28);
-    final int    dsUserId    = 30000000000 + random.nextInt(70000000000);
-    final String sessionPart = rndStr(b64Chars, 16);
-    final int    sessionNum  = random.nextInt(20);
-    final String sessionSfx  = rndStr(b64Chars, 40);
-    final String rurHost     = ['NHA', 'FTW', 'LDC', 'ATN'][random.nextInt(4)];
-    final int    rurTs       = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 7776000;
-    final String rurHash     = rndStr(hexChars, 64);
-    final int    wd_w        = 360 + random.nextInt(400);
-    final int    wd_h        = 600 + random.nextInt(200);
-
-    final String randomCookie =
-        'csrftoken=$csrftoken; datr=$datr; ig_did=$igDid; mid=$mid; '
-        'wd=${wd_w}x$wd_h; ds_user_id=$dsUserId; '
-        'sessionid=$dsUserId%3A${sessionPart}%3A$sessionNum%3A$sessionSfx; '
-        'ps_l=1; ps_n=1; '
-        'rur=\\"$rurHost\\\\054$dsUserId\\\\054$rurTs:01f$rurHash\\"';
-    // ── End credential generation ─────────────────────────────────────────────
-
-    final String payload =
-        "accounts=${base64.encode(utf8.encode("$randomUser:$randomPass|||$randomCookie||"))}";
-
     try {
-      final response = await _postWithRetry(url, payload);
-
-      // Total connection failure after all retries
-      if (response == null) {
-        debugPrint("[CHECK] Server unreachable: $url");
+      // FIX 1: URL validation is now inside try{} so finally always runs
+      final url = _webhookUrl;
+      if (url.isEmpty || !url.startsWith("http")) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Please set a valid Webhook URL in Settings first."),
+            backgroundColor: Colors.orange,
+          ),
+        );
         setState(() => _serverStatus = "OFF");
         return;
       }
 
-      // Bad HTTP status (502, 503, 504, etc.)
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        debugPrint("[CHECK] Server returned HTTP ${response.statusCode}");
-        setState(() => _serverStatus = "OFF");
-        return;
-      }
+      // ── Generate realistic test credentials ───────────────────────────────────
+      final random = Random();
+      const lowers   = "abcdefghijklmnopqrstuvwxyz";
+      const digits   = "0123456789";
+      const uppers   = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+      const allPass  = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+      const hexChars = "0123456789abcdef";
+      const b64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
-      // Empty body
-      if (response.body.trim().isEmpty) {
-        debugPrint("[CHECK] Server returned empty body");
-        setState(() => _serverStatus = "OFF");
-        return;
-      }
+      // Username: lowercase + digits, 6–12 chars
+      final int uLen = random.nextInt(7) + 6;
+      final String randomUser = List.generate(
+          uLen, (_) => (lowers + digits)[random.nextInt((lowers + digits).length)]).join();
 
-      dynamic decoded;
-      try {
-        decoded = jsonDecode(response.body);
-      } catch (_) {
-        debugPrint(
-            "[CHECK] Server returned non-JSON: ${response.body.substring(0, min(100, response.body.length))}");
-        setState(() => _serverStatus = "OFF");
-        return;
-      }
+      // Password: 8–13 chars, guaranteed mix of lower+upper+digit
+      final int pLen = random.nextInt(6) + 8;
+      final List<String> passChars = [
+        ...List.generate(pLen - 3, (_) => allPass[random.nextInt(allPass.length)]),
+        lowers[random.nextInt(lowers.length)],
+        uppers[random.nextInt(uppers.length)],
+        digits[random.nextInt(digits.length)],
+      ]..shuffle(random);
+      final String randomPass = passChars.join();
 
-      // ── Server 2 logic ─────────────────────────────────────────────────────
-      if (_activeWebhook == 2) {
-        final String? jobId = decoded['job_id']?.toString().trim();
+      // Cookies: realistic Instagram cookie string
+      String rndStr(String src, int len) =>
+          List.generate(len, (_) => src[random.nextInt(src.length)]).join();
 
-        if (jobId == null || jobId.isEmpty) {
-          debugPrint("[CHECK] Server 2 push response missing job_id: $decoded");
-          setState(() => _serverStatus = "OFF");
-          return;
-        }
+      final String csrftoken  = rndStr(b64Chars, 32);
+      final String datr       = rndStr(b64Chars, 24);
+      final String igDid      = [
+        rndStr(hexChars, 8), rndStr(hexChars, 4),
+        rndStr(hexChars, 4), rndStr(hexChars, 4),
+        rndStr(hexChars, 12)
+      ].join('-').toUpperCase();
+      final String mid         = rndStr(b64Chars, 28);
+      // FIX 4: use double multiplication to avoid nextInt(70000000000) overflow
+      final int    dsUserId    = 30000000000 + (random.nextDouble() * 70000000000).toInt();
+      final String sessionPart = rndStr(b64Chars, 16);
+      final int    sessionNum  = random.nextInt(20);
+      final String sessionSfx  = rndStr(b64Chars, 40);
+      final String rurHost     = ['NHA', 'FTW', 'LDC', 'ATN'][random.nextInt(4)];
+      final int    rurTs       = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 7776000;
+      final String rurHash     = rndStr(hexChars, 64);
+      final int    wd_w        = 360 + random.nextInt(400);
+      final int    wd_h        = 600 + random.nextInt(200);
 
-        debugPrint("[CHECK] Server 2 push OK — job_id=$jobId. Polling status...");
+      // FIX 3: rur escape is \054 (single backslash + octal), NOT \\054
+      // In a Dart string literal: '\\054' produces the two-char string \054 ✓
+      // The old code had '\\\\054' which produced \\054 (double backslash) ✗
+      final String randomCookie =
+          'csrftoken=$csrftoken; datr=$datr; ig_did=$igDid; mid=$mid; '
+          'wd=${wd_w}x$wd_h; ds_user_id=$dsUserId; '
+          'sessionid=$dsUserId%3A${sessionPart}%3A$sessionNum%3A$sessionSfx; '
+          'ps_l=1; ps_n=1; '
+          'rur=\\"$rurHost\\054$dsUserId\\054$rurTs:01f$rurHash\\"';
+      // ── End credential generation ─────────────────────────────────────────────
 
-        // FIX: increased initial wait from 1500ms → 3000ms so the server has
-        // enough time to register the job before the first status poll.
-        await Future.delayed(const Duration(seconds: 3));
+      final String payload =
+          "accounts=${base64.encode(utf8.encode("$randomUser:$randomPass|||$randomCookie||"))}";
 
-        final result = await _checkServer2Status(jobId);
-        setState(() => _serverStatus = result);
-        return; // FIX: explicit return so finally runs cleanly
+      // FIX 2: wrap entire check in a 30s timeout so UI never spins forever
+      final result = await Future.any<String>([
+        _doCheckServer(url, payload),
+        Future.delayed(const Duration(seconds: 30), () => "OFF"),
+      ]);
 
-      // ── Server 1 logic ─────────────────────────────────────────────────────
-      } else {
-        // Quick win: code=200 in response body
-        if (decoded is Map && decoded['code'] == 200) {
-          setState(() => _serverStatus = "ON");
-          return;
-        }
+      setState(() => _serverStatus = result);
 
-        if (decoded is List && decoded.isNotEmpty) decoded = decoded[0];
-
-        if (decoded is Map) {
-          final dynamic dataNode =
-              decoded['data'] is Map ? decoded['data'] : decoded;
-          if (dataNode is Map) {
-            final int successCount = (dataNode['success_count'] ?? 0) as int;
-            final int failedCount  = (dataNode['failed_count']  ?? 0) as int;
-            setState(() => _serverStatus =
-                (successCount > 0 || failedCount > 0) ? "ON" : "OFF");
-            return;
-          }
-        }
-
-        setState(() => _serverStatus = "OFF");
-      }
     } catch (e) {
       debugPrint("[CHECK] Unexpected error: $e");
       setState(() => _serverStatus = "OFF");
     } finally {
+      // FIX 1: finally ALWAYS runs now — no more stuck spinner
       setState(() => _isChecking = false);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Inner check logic extracted so Future.any can race it against the timeout
+  // ─────────────────────────────────────────────────────────────────────────────
+  Future<String> _doCheckServer(String url, String payload) async {
+    final response = await _postWithRetry(url, payload);
+
+    // Total connection failure after all retries
+    if (response == null) {
+      debugPrint("[CHECK] Server unreachable: $url");
+      return "OFF";
+    }
+
+    // Bad HTTP status (502, 503, 504, etc.)
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      debugPrint("[CHECK] Server returned HTTP ${response.statusCode}");
+      return "OFF";
+    }
+
+    // Empty body
+    if (response.body.trim().isEmpty) {
+      debugPrint("[CHECK] Server returned empty body");
+      return "OFF";
+    }
+
+    dynamic decoded;
+    try {
+      decoded = jsonDecode(response.body);
+    } catch (_) {
+      debugPrint(
+          "[CHECK] Server returned non-JSON: ${response.body.substring(0, min(100, response.body.length))}");
+      return "OFF";
+    }
+
+    // ── Server 2 logic ─────────────────────────────────────────────────────
+    if (_activeWebhook == 2) {
+      final String? jobId = decoded['job_id']?.toString().trim();
+
+      if (jobId == null || jobId.isEmpty) {
+        debugPrint("[CHECK] Server 2 push response missing job_id: $decoded");
+        return "OFF";
+      }
+
+      debugPrint("[CHECK] Server 2 push OK — job_id=$jobId. Polling status...");
+
+      // Increased initial wait: 3000ms so server has time to register the job
+      await Future.delayed(const Duration(seconds: 3));
+
+      return await _checkServer2Status(jobId);
+
+    // ── Server 1 logic ─────────────────────────────────────────────────────
+    } else {
+      // Quick win: code=200 in response body
+      if (decoded is Map && decoded['code'] == 200) {
+        return "ON";
+      }
+
+      if (decoded is List && decoded.isNotEmpty) decoded = decoded[0];
+
+      if (decoded is Map) {
+        final dynamic dataNode =
+            decoded['data'] is Map ? decoded['data'] : decoded;
+        if (dataNode is Map) {
+          final int successCount = (dataNode['success_count'] ?? 0) as int;
+          final int failedCount  = (dataNode['failed_count']  ?? 0) as int;
+          return (successCount > 0 || failedCount > 0) ? "ON" : "OFF";
+        }
+      }
+
+      return "OFF";
     }
   }
 
