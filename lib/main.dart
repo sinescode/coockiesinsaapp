@@ -644,13 +644,14 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Server 2: Step 2 — Poll /api/status/{job_id}, errors=null → ONLINE
-  // Mirrors Python check_server2_status() exactly.
+  // FIX: Server 2 status poll — retries on ANY non-terminal status instead of
+  // immediately returning "OFF". Handles "queued", "received", or any other
+  // transitional status the server may return. Polls up to 8 times (16s max).
   // ─────────────────────────────────────────────────────────────────────────────
   Future<String> _checkServer2Status(String jobId) async {
     final statusUrl = Uri.parse("https://submitwork.org/api/status/$jobId");
 
-    for (int attempt = 0; attempt < 3; attempt++) {
+    for (int attempt = 0; attempt < 8; attempt++) {
       try {
         final res = await http
             .get(statusUrl)
@@ -658,13 +659,13 @@ class _MainScreenState extends State<MainScreen> {
 
         // Bad HTTP — server is down
         if (res.statusCode < 200 || res.statusCode >= 300) {
-          debugPrint("[STATUS2] HTTP ${res.statusCode} for job_id=$jobId");
+          debugPrint("[STATUS2] HTTP ${res.statusCode} → OFF");
           return "OFF";
         }
 
         final body = res.body.trim();
         if (body.isEmpty) {
-          debugPrint("[STATUS2] Empty response for job_id=$jobId");
+          debugPrint("[STATUS2] Empty body → OFF");
           return "OFF";
         }
 
@@ -672,45 +673,53 @@ class _MainScreenState extends State<MainScreen> {
         try {
           data = jsonDecode(body);
         } on FormatException catch (e) {
-          debugPrint("[STATUS2] JSON parse error for job_id=$jobId: $e");
+          debugPrint("[STATUS2] JSON parse error: $e → OFF");
           return "OFF";
         }
 
-        // errors=null means server handled the job (even if failed_count>0).
-        // failed_count>0 just means the account was invalid, NOT server down.
-        final errors = data['errors'];
+        // Job not found / expired — server is reachable but job is gone
+        if (data is Map && data.containsKey('error')) {
+          debugPrint("[STATUS2] Server returned error: ${data['error']} → OFF");
+          return "OFF";
+        }
+
+        final errors    = data['errors'];
         final String jobStatus = (data['status'] ?? '') as String;
 
+        debugPrint("[STATUS2] attempt=$attempt  status=$jobStatus  errors=$errors");
+
+        // ── Terminal success: server processed the job (errors==null) ──────────
         if (errors == null &&
             (jobStatus == 'done' ||
              jobStatus == 'processing' ||
              jobStatus == 'pending' ||
              jobStatus == 'staging')) {
-          debugPrint("[STATUS2] Server 2 ONLINE — job=$jobId status=$jobStatus");
+          debugPrint("[STATUS2] Server 2 ONLINE ✓");
           return "ON";
         }
 
-        debugPrint("[STATUS2] Server 2 check failed — errors=$errors status=$jobStatus");
-        return "OFF";
+        // ── Not ready yet OR unexpected status — wait 2s and retry ────────────
+        // This is the KEY FIX: the old code did `return "OFF"` here, which meant
+        // any status not in the list above (e.g. "queued", "received", or a job
+        // that hasn't started yet) would immediately report the server as OFF.
+        debugPrint("[STATUS2] Not ready (status=$jobStatus errors=$errors), retrying in 2s...");
+        await Future.delayed(const Duration(seconds: 2));
 
       } on TimeoutException {
-        debugPrint("[STATUS2] Attempt ${attempt + 1}/3 timeout for job_id=$jobId");
+        debugPrint("[STATUS2] Timeout on attempt $attempt, retrying...");
+        await Future.delayed(const Duration(seconds: 2));
       } catch (e) {
-        debugPrint("[STATUS2] Attempt ${attempt + 1}/3 error: ${e.runtimeType}: $e");
-        return "OFF"; // Non-retryable unexpected error
-      }
-
-      if (attempt < 2) {
-        await Future.delayed(Duration(seconds: attempt + 1));
+        debugPrint("[STATUS2] Unexpected error: ${e.runtimeType}: $e → OFF");
+        return "OFF";
       }
     }
 
-    debugPrint("[STATUS2] All retries exhausted for job_id=$jobId");
+    debugPrint("[STATUS2] All attempts exhausted → OFF");
     return "OFF";
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Check server status — mirrors Python check_server_logic() exactly.
+  // Check server status
   // Server 1: push → success_count or failed_count > 0 → ONLINE
   // Server 2: push → job_id → poll /api/status/{job_id} → errors=null → ONLINE
   // ─────────────────────────────────────────────────────────────────────────────
@@ -733,10 +742,10 @@ class _MainScreenState extends State<MainScreen> {
 
     // ── Generate realistic test credentials ───────────────────────────────────
     final random = Random();
-    const lowers = "abcdefghijklmnopqrstuvwxyz";
-    const digits = "0123456789";
-    const uppers = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    const allPass = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    const lowers   = "abcdefghijklmnopqrstuvwxyz";
+    const digits   = "0123456789";
+    const uppers   = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const allPass  = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     const hexChars = "0123456789abcdef";
     const b64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
@@ -759,23 +768,23 @@ class _MainScreenState extends State<MainScreen> {
     String rndStr(String src, int len) =>
         List.generate(len, (_) => src[random.nextInt(src.length)]).join();
 
-    final String csrftoken = rndStr(b64Chars, 32);
-    final String datr      = rndStr(b64Chars, 24);
-    final String igDid     = [
+    final String csrftoken  = rndStr(b64Chars, 32);
+    final String datr       = rndStr(b64Chars, 24);
+    final String igDid      = [
       rndStr(hexChars, 8), rndStr(hexChars, 4),
       rndStr(hexChars, 4), rndStr(hexChars, 4),
       rndStr(hexChars, 12)
     ].join('-').toUpperCase();
-    final String mid        = rndStr(b64Chars, 28);
-    final int    dsUserId   = 30000000000 + random.nextInt(70000000000);
+    final String mid         = rndStr(b64Chars, 28);
+    final int    dsUserId    = 30000000000 + random.nextInt(70000000000);
     final String sessionPart = rndStr(b64Chars, 16);
     final int    sessionNum  = random.nextInt(20);
     final String sessionSfx  = rndStr(b64Chars, 40);
-    final String rurHost    = ['NHA', 'FTW', 'LDC', 'ATN'][random.nextInt(4)];
-    final int    rurTs      = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 7776000;
-    final String rurHash    = rndStr(hexChars, 64);
-    final int    wd_w       = 360 + random.nextInt(400);
-    final int    wd_h       = 600 + random.nextInt(200);
+    final String rurHost     = ['NHA', 'FTW', 'LDC', 'ATN'][random.nextInt(4)];
+    final int    rurTs       = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 7776000;
+    final String rurHash     = rndStr(hexChars, 64);
+    final int    wd_w        = 360 + random.nextInt(400);
+    final int    wd_h        = 600 + random.nextInt(200);
 
     final String randomCookie =
         'csrftoken=$csrftoken; datr=$datr; ig_did=$igDid; mid=$mid; '
@@ -834,11 +843,13 @@ class _MainScreenState extends State<MainScreen> {
 
         debugPrint("[CHECK] Server 2 push OK — job_id=$jobId. Polling status...");
 
-        // Brief wait for the job to start processing on the server
-        await Future.delayed(const Duration(milliseconds: 1500));
+        // FIX: increased initial wait from 1500ms → 3000ms so the server has
+        // enough time to register the job before the first status poll.
+        await Future.delayed(const Duration(seconds: 3));
 
         final result = await _checkServer2Status(jobId);
         setState(() => _serverStatus = result);
+        return; // FIX: explicit return so finally runs cleanly
 
       // ── Server 1 logic ─────────────────────────────────────────────────────
       } else {
@@ -1010,7 +1021,6 @@ class _MainScreenState extends State<MainScreen> {
               int successCount = dataNode['success_count'] ?? 0;
               int failedCount = dataNode['failed_count'] ?? 0;
 
-              // FIX: use Unicode escapes to avoid encoding corruption
               logMessage =
                   "\u2714 Success: $successCount | \u2717 Failed: $failedCount";
 
@@ -2145,8 +2155,6 @@ class _MainScreenState extends State<MainScreen> {
       ],
     );
   }
-
-
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Staged Job Tile
