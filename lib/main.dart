@@ -1033,9 +1033,6 @@ class _MainScreenState extends State<MainScreen> {
               int successCount = dataNode['success_count'] ?? 0;
               int failedCount = dataNode['failed_count'] ?? 0;
 
-              logMessage =
-                  "\u2714 Success: $successCount | \u2717 Failed: $failedCount";
-
               String logStyle = "normal";
               if (successCount == 0) {
                 logStatus = "Error";
@@ -1043,8 +1040,11 @@ class _MainScreenState extends State<MainScreen> {
                 logStyle = "bold";
               }
 
-              _addLog(logStatus, "(${response.statusCode}) $logMessage",
-                  style: logStyle);
+              _addLog(
+                logStatus,
+                "$username \u2192 \u2714 $successCount | \u2717 $failedCount",
+                style: logStyle,
+              );
             } else {
               logMessage = response.body.trim();
               _addLog(logStatus, "(${response.statusCode}) $logMessage");

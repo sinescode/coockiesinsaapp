@@ -13,22 +13,22 @@ jobs:
     steps:
     # 1️⃣ Checkout code
     - uses: actions/checkout@v3
-    
+
     # 2️⃣ Setup Java
     - uses: actions/setup-java@v3
       with:
         distribution: 'temurin'
         java-version: '17'
-    
+
     # 3️⃣ Setup Flutter
     - uses: subosito/flutter-action@v2
       with:
         channel: 'stable'
-    
+
     # 4️⃣ Get dependencies
     - name: Get dependencies
       run: flutter pub get
-    
+
     # 5️⃣ Decode google-services.json
     - name: Decode google-services.json
       env:
@@ -38,9 +38,7 @@ jobs:
           echo "Error: GOOGLE_SERVICES_JSON secret is not set!"
           exit 1
         fi
-        # Create directory if it doesn't exist
         mkdir -p android/app
-        # Decode and write to the expected location
         echo "$GOOGLE_SERVICES_JSON" | base64 -di > android/app/google-services.json
         echo "google-services.json created successfully"
         ls -la android/app/google-services.json
@@ -53,46 +51,41 @@ jobs:
         KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
       run: |
-        # If secrets are not set, build unsigned release
         if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
           echo "Warning: Signing secrets not fully configured. Building unsigned release APK."
           flutter build apk --release --split-per-abi
         else
           echo "Setting up signing configuration..."
-          # Decode keystore to android/app directory
           echo "$KEYSTORE_BASE64" | base64 -di > android/app/release.keystore
-          
-          # Create key.properties file using echo (avoids EOF indentation issues)
           echo "storePassword=$KEYSTORE_PASSWORD" > android/key.properties
           echo "keyPassword=$KEY_PASSWORD" >> android/key.properties
           echo "keyAlias=$KEY_ALIAS" >> android/key.properties
           echo "storeFile=release.keystore" >> android/key.properties
-          
-          # Build signed APK
           flutter build apk --release --split-per-abi
-          
-          # Cleanup sensitive files
           rm -f android/app/release.keystore
           rm -f android/key.properties
         fi
 
-    # 7️⃣ Rename APKs
+    # 7️⃣ Rename APKs + export SUFFIX as env var
     - name: Rename APKs
       run: |
         VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | sed 's/+.*//' | tr -d '[:space:]')
         DATE=$(date +'%d_%m_%Y')
         SUFFIX="V${VERSION}_Release_${DATE}"
-    
+
         mv build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
            build/app/outputs/flutter-apk/CookiesInsta_${SUFFIX}_arm64.apk
         mv build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk \
            build/app/outputs/flutter-apk/CookiesInsta_${SUFFIX}_armv7a.apk
 
+        # Export for next step
+        echo "SUFFIX=$SUFFIX" >> $GITHUB_ENV
+
     # 8️⃣ Upload APKs
     - name: Upload APKs
       uses: actions/upload-artifact@v4
       with:
-        name: release-apks
+        name: release-apks_${{ env.SUFFIX }}_(arm64+armv7)
         path: |
           build/app/outputs/flutter-apk/CookiesInsta_V*_arm64.apk
           build/app/outputs/flutter-apk/CookiesInsta_V*_armv7a.apk
