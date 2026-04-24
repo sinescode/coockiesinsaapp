@@ -79,8 +79,14 @@ jobs:
     # 7️⃣ Rename APKs
     - name: Rename APKs
       run: |
-        mv build/app/outputs/flutter-apk/app-arm64-v8a-release.apk build/app/outputs/flutter-apk/CookiesInsta-arm64.apk
-        mv build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk build/app/outputs/flutter-apk/CookiesInsta-armv7a.apk
+        VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | sed 's/+.*//' | tr -d '[:space:]')
+        DATE=$(date +'%d_%m_%Y')
+        SUFFIX="V${VERSION}_Release_${DATE}"
+    
+        mv build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+           build/app/outputs/flutter-apk/CookiesInsta_${SUFFIX}_arm64.apk
+        mv build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk \
+           build/app/outputs/flutter-apk/CookiesInsta_${SUFFIX}_armv7a.apk
 
     # 8️⃣ Upload APKs
     - name: Upload APKs
@@ -88,5 +94,5 @@ jobs:
       with:
         name: release-apks
         path: |
-          build/app/outputs/flutter-apk/CookiesInsta-arm64.apk
-          build/app/outputs/flutter-apk/CookiesInsta-armv7a.apk
+          build/app/outputs/flutter-apk/CookiesInsta_V*_arm64.apk
+          build/app/outputs/flutter-apk/CookiesInsta_V*_armv7a.apk
