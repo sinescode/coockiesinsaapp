@@ -261,7 +261,9 @@ class _MainScreenState extends State<MainScreen> {
       if (savedWebhookEnabled != null) _webhookEnabled = savedWebhookEnabled;
       if (savedAutoPassword != null) _autoRandomPassword = savedAutoPassword;
       if (savedFilename != null) _jsonFilename = savedFilename;
-      _currentPassword = savedPassword ?? "";
+      final bool autoPasswordOn = savedAutoPassword ?? true;
+      _currentPassword = (autoPasswordOn && savedPassword != null) ? savedPassword : "";
+
       if (savedToken != null) _fcmToken = savedToken;
 
       _webhook1Controller.text = _webhook1Url;
@@ -317,7 +319,12 @@ class _MainScreenState extends State<MainScreen> {
     await prefs.setBool('webhook_enabled', _webhookEnabled);
     await prefs.setBool('auto_random_password', _autoRandomPassword);
     await prefs.setString('json_filename', _jsonFilename);
-    await prefs.setString('current_password', _currentPassword);
+    // Only persist password when auto random password is ON
+    if (_autoRandomPassword) {
+      await prefs.setString('current_password', _currentPassword);
+    } else {
+      await prefs.remove('current_password');
+    }
     await prefs.setString('accounts_list', json.encode(_accounts));
     await prefs.setString('logs_list', json.encode(_logs));
     await prefs.setString('staged_jobs', json.encode(_stagedJobs));
@@ -927,7 +934,7 @@ class _MainScreenState extends State<MainScreen> {
     if (!_webhookEnabled) {
       _usernameController.clear();
       _cookiesController.clear();
-      if (_autoRandomPassword) _generatePassword();
+      if (_autoRandomPassword) {   _generatePassword(); } else {   _currentPassword = "";   _passwordController.clear(); }
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("Account saved successfully (Webhook OFF)"),
@@ -950,7 +957,7 @@ class _MainScreenState extends State<MainScreen> {
         _addLog("Error", "Server unreachable after 3 attempts");
         _usernameController.clear();
         _cookiesController.clear();
-        if (_autoRandomPassword) _generatePassword();
+        if (_autoRandomPassword) {   _generatePassword(); } else {   _currentPassword = "";   _passwordController.clear(); }
         return;
       }
 
@@ -958,7 +965,7 @@ class _MainScreenState extends State<MainScreen> {
         _addLog("Error", "(${pushResponse.statusCode}) Empty response");
         _usernameController.clear();
         _cookiesController.clear();
-        if (_autoRandomPassword) _generatePassword();
+        if (_autoRandomPassword) {   _generatePassword(); } else {   _currentPassword = "";   _passwordController.clear(); }
         return;
       }
 
@@ -970,7 +977,7 @@ class _MainScreenState extends State<MainScreen> {
             "(${pushResponse.statusCode}) Invalid JSON: ${pushResponse.body}");
         _usernameController.clear();
         _cookiesController.clear();
-        if (_autoRandomPassword) _generatePassword();
+        if (_autoRandomPassword) {   _generatePassword(); } else {   _currentPassword = "";   _passwordController.clear(); }
         return;
       }
 
@@ -980,7 +987,7 @@ class _MainScreenState extends State<MainScreen> {
         _addLog("Error", "(${pushResponse.statusCode}) $msg");
         _usernameController.clear();
         _cookiesController.clear();
-        if (_autoRandomPassword) _generatePassword();
+        if (_autoRandomPassword) {   _generatePassword(); } else {   _currentPassword = "";   _passwordController.clear(); }
         return;
       }
 
@@ -1056,7 +1063,7 @@ class _MainScreenState extends State<MainScreen> {
 
     _usernameController.clear();
     _cookiesController.clear();
-    if (_autoRandomPassword) _generatePassword();
+    if (_autoRandomPassword) {   _generatePassword(); } else {   _currentPassword = "";   _passwordController.clear(); }
   }
 
   // --- Save (formerly Submit) - for non-webhook mode ---
@@ -1094,7 +1101,12 @@ class _MainScreenState extends State<MainScreen> {
 
     _usernameController.clear();
     _cookiesController.clear();
-    if (_autoRandomPassword) _generatePassword();
+    if (_autoRandomPassword) {
+      _generatePassword();
+    } else {
+      _currentPassword = "";
+      _passwordController.clear();
+    }
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
